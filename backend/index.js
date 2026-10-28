@@ -8,14 +8,17 @@ const app = express();
 
 connectDB();
 
-app.use(cors());
+app.use(cors({
+  origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
+  credentials: true,
+}));
 app.use(express.json());
 
 app.get('/', (req, res) => {
   res.json({ success: true, message: 'Bring Basket API running' });
 });
 
-app.use('/api/v1', require('./src/routes/v1/index'));
+app.use('/api/v1', require('./src/routes/v1'));
 
 app.use(errorHandler);
 

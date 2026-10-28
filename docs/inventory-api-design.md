@@ -42,6 +42,8 @@ schema reference only; this design does not migrate its records.
 
 ### ⏳ Remaining (by priority)
 
+> Note: this status reflects the migration-era backlog. Some warehouse operations are already implemented in the live backend even if the design doc was not updated.
+
 | Phase | Area | Backend | Frontend |
 |---|---|---|---|
 | 1 | Unit Groups + Conversions | ❌ | ❌ |
@@ -49,7 +51,6 @@ schema reference only; this design does not migrate its records.
 | 2 | Warehouse Stock (balances, adjustments) | ❌ | ❌ |
 | 2 | Stock Movements | ❌ | ❌ |
 | 2 | Stock Transfers (warehouse ↔ warehouse) | ❌ | ❌ |
-| 2 | Store Stock Requests | ❌ | ❌ |
 | 2 | Batch Write-offs | ❌ | ❌ |
 | 3 | Purchase Vendors | ❌ | ❌ |
 | 3 | Purchase Orders | ❌ | ❌ |
@@ -63,6 +64,19 @@ schema reference only; this design does not migrate its records.
 | 6 | Carts, Coupons, Reviews | ❌ | ❌ |
 | 7 | Accounting / Wallet / Disbursements | ❌ | ❌ |
 | 8 | Notifications, Settings, Misc | ❌ | ❌ |
+
+### ✅ Implemented in backend beyond the original backlog
+
+The following module is already live in the codebase and should be treated as canonical even though it was originally marked backlog-only in earlier docs:
+
+- Store stock request workflow
+  - `GET /admin/store-stock-requests`
+  - `POST /admin/store-stock-requests`
+  - `GET /admin/store-stock-requests/:id`
+  - `PATCH /admin/store-stock-requests/:id/approve`
+  - `PATCH /admin/store-stock-requests/:id/dispatch`
+  - `PATCH /admin/store-stock-requests/:id/receive`
+  - `PATCH /admin/store-stock-requests/:id/reject`
 
 ---
 
@@ -222,13 +236,13 @@ source schema. Warehouse balances are separate and must be changed through
 | PATCH | `/admin/stock-transfers/:id/dispatch` | ❌ |
 | PATCH | `/admin/stock-transfers/:id/receive` | ❌ |
 | PATCH | `/admin/stock-transfers/:id/reject` | ❌ |
-| GET | `/admin/store-stock-requests?storeId=&status=` | ❌ |
-| POST | `/admin/store-stock-requests` | ❌ |
-| GET | `/admin/store-stock-requests/:id` | ❌ |
-| PATCH | `/admin/store-stock-requests/:id/approve` | ❌ |
-| PATCH | `/admin/store-stock-requests/:id/dispatch` | ❌ |
-| PATCH | `/admin/store-stock-requests/:id/receive` | ❌ |
-| PATCH | `/admin/store-stock-requests/:id/reject` | ❌ |
+| GET | `/admin/store-stock-requests?storeId=&status=` | ✅ |
+| POST | `/admin/store-stock-requests` | ✅ |
+| GET | `/admin/store-stock-requests/:id` | ✅ |
+| PATCH | `/admin/store-stock-requests/:id/approve` | ✅ |
+| PATCH | `/admin/store-stock-requests/:id/dispatch` | ✅ |
+| PATCH | `/admin/store-stock-requests/:id/receive` | ✅ |
+| PATCH | `/admin/store-stock-requests/:id/reject` | ✅ |
 | GET | `/admin/batch-write-offs?itemId=&storeId=` | ❌ |
 | POST | `/admin/batch-write-offs` | ❌ |
 

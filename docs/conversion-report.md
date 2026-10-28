@@ -228,50 +228,41 @@ bring-basket-fb/
 ├── backend/
 │   ├── src/
 │   │   ├── config/db.js
-│   │   ├── controllers/
-│   │   │   ├── admin/
-│   │   │   │   ├── auth/         (auth, admins, roles)
-│   │   │   │   ├── catalog/      (brand, category, item, unit)
-│   │   │   │   ├── store/        (module, zone, store)  ✅
-│   │   │   │   ├── warehouse/    (warehouse)
-│   │   │   │   ├── order/        ❌
-│   │   │   │   └── purchase/     ❌
-│   │   │   ├── customer/
-│   │   │   ├── vendor/
-│   │   │   ├── supplier/
-│   │   │   ├── warehouse/
-│   │   │   └── deliveryman/
+│   │   ├── domains/                        ← all business logic lives here
+│   │   │   ├── identity/                   (admin-auth, admins, roles, customer-auth,
+│   │   │   │                                vendor-auth, supplier-auth, deliveryman-auth,
+│   │   │   │                                warehouse-auth)
+│   │   │   ├── catalog/                    (brands, categories, items, units,
+│   │   │   │                                unit-groups, item-batches)
+│   │   │   ├── inventory/                  (warehouses, warehouse-stock, stock-movements,
+│   │   │   │                                stock-transfers, store-stock-requests,
+│   │   │   │                                batch-write-offs, store-item-stock.model,
+│   │   │   │                                store-stock.service, warehouses.service,
+│   │   │   │                                warehouse-stock.service)
+│   │   │   └── store/                      (modules, zones, stores)
 │   │   ├── middleware/
 │   │   │   ├── auth.js
 │   │   │   ├── roleCheck.js
 │   │   │   └── errorHandler.js
-│   │   ├── models/
-│   │   │   ├── auth/             (Admin, AdminRole, User, Vendor, VendorEmployee, DeliveryMan)
-│   │   │   ├── catalog/          (Item, Category, Brand, Unit, UnitGroup, ItemBatch, ...)
-│   │   │   ├── store/            (Module, Store, Zone)  ✅
-│   │   │   ├── warehouse/        (Warehouse, WarehouseItemStock, ...)
-│   │   │   ├── order/            ❌
-│   │   │   ├── purchase/         ❌
-│   │   │   ├── accounting/       ❌
+│   │   ├── models/                         ← shared models (move per-service on extraction)
+│   │   │   ├── auth/
+│   │   │   ├── catalog/
+│   │   │   ├── store/
+│   │   │   ├── warehouse/
+│   │   │   ├── purchase/                   ❌ not yet migrated
 │   │   │   └── GeneratedBusinessModels.js
 │   │   ├── routes/v1/
-│   │   │   ├── admin/
-│   │   │   ├── customer/
-│   │   │   ├── vendor/
-│   │   │   ├── supplier/
-│   │   │   ├── warehouse/
-│   │   │   ├── deliveryman/
-│   │   │   └── index.js
+│   │   │   └── index.js                    ← only router, points to domains/
 │   │   └── utils/
 │   │       ├── response.js
-│   │       └── pagination.js
+│   │       ├── pagination.js
+│   │       └── AppError.js
+│   ├── scripts/
 │   ├── index.js
 │   └── package.json
 ├── frontend/
-│   └── src/app/        (Next.js 16 — scaffold only, not started)
+│   └── src/app/        (Next.js — in progress)
 ├── docs/
-│   ├── inventory-api-design.md
-│   └── conversion-report.md
 └── .gitignore
 ```
 
