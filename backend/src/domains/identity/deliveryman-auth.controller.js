@@ -1,9 +1,6 @@
-const jwt = require('jsonwebtoken');
 const DeliveryMan = require('../../models/auth/DeliveryMan');
+const { generateToken } = require('../../middleware/auth');
 const { success, error } = require('../../utils/response');
-
-const generateToken = (id, role) =>
-  jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
 
 exports.login = async (req, res, next) => {
   try {

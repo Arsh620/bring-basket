@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 
 const billItemSchema = new mongoose.Schema({
+  purchaseOrderItemId: { type: mongoose.Schema.Types.ObjectId },
   itemId:           { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
   sortOrder:        { type: Number, default: 0 },
   itemName:         { type: String, required: true },
@@ -10,6 +11,7 @@ const billItemSchema = new mongoose.Schema({
   schemeBuyQty:     { type: Number },
   schemeGetQty:     { type: Number },
   freeQty:          { type: Number, default: 0 },
+  billedQty:        { type: Number },
   batchCode:        { type: String },
   expiryDate:       { type: Date },
   qtyReceived:      { type: Number, default: 0 },
@@ -57,6 +59,7 @@ const purchaseBillSchema = new mongoose.Schema({
   vendorInvoiceUploadedAt:    { type: Date },
   grnInvoicePath:             { type: String },
   grnInvoiceOriginalName:     { type: String },
+  grnInvoiceMimeType:         { type: String },
   grnInvoiceUploadedAt:       { type: Date },
   items:                      [billItemSchema],
 }, { timestamps: true });

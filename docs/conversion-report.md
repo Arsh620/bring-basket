@@ -85,11 +85,13 @@ These will be done in one go after all features are complete. Do NOT stop featur
 
 | Area | Backend | Frontend |
 |---|---|---|
-| Purchase Vendors | ❌ | ❌ |
-| Purchase Orders | ❌ | ❌ |
-| Purchase Bills / GRN | ❌ | ❌ |
+| Purchase Vendors | ✅ CRUD, filters, status + approval | ❌ |
+| Purchase Orders | ✅ CRUD, filters, issue + cancel | ❌ |
+| Purchase Bills / GRN | ✅ PO conversion, list/detail, guarded bill edit/void, stock receipt and protected invoice download | ✅ Bill details, guarded edits/voids, warehouse selection and GRN invoice upload |
 | Purchase Returns | ❌ | ❌ |
-| Purchase Payments | ❌ | ❌ |
+| Purchase Payments | ✅ list, record, delete and bill settlement | ✅ payment history, filters, record/delete and bill payment integration |
+
+**Next:** Purchase Returns / Debit Notes
 
 ---
 

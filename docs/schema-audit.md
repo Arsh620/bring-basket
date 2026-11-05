@@ -2,7 +2,7 @@
 
 **Date:** 2025
 **Purpose:** Compare hand-written Mongoose models vs GeneratedBusinessModels.js (MySQL source of truth)
-**Status:** Pre-API, Pre-Microservices
+**Status:** Schema comparison reference; API implementation is in progress
 
 ---
 
@@ -203,31 +203,24 @@ Same as above — keep embedded items array.
 
 ---
 
-## Missing Models (Need to create for microservices)
+## API Workflows Still to Implement
 
-These are in `GeneratedBusinessModels.js` but have NO hand-written model and will need proper models for their respective microservices:
+The generated schemas and the hand-written Purchase models are data-model
+references, not evidence that the corresponding APIs are complete. Purchase
+Vendor, Purchase Order, and Purchase Bill/GRN APIs are implemented in the Node
+backend; the remaining workflows should be built incrementally in the current
+monolith.
 
-| Collection | Microservice | Priority |
+| Collection(s) | API workflow | Priority |
 |---|---|---|
-| `purchase_vendors` | purchase-service | HIGH |
-| `purchase_orders` | purchase-service | HIGH |
-| `purchase_bills` | purchase-service | HIGH |
-| `purchase_order_items` | purchase-service | HIGH |
-| `purchase_bill_items` | purchase-service | HIGH |
-| `purchase_payments` | purchase-service | HIGH |
-| `purchase_returns` | purchase-service | HIGH |
-| `orders` | order-service | HIGH |
-| `order_details` | order-service | HIGH |
-| `carts` | order-service | MEDIUM |
-| `coupons` | order-service | MEDIUM |
-| `account_ledgers` | accounting-service | MEDIUM |
-| `account_journal_entries` | accounting-service | MEDIUM |
-| `expenses` | accounting-service | MEDIUM |
-| `wallet_transactions` | accounting-service | MEDIUM |
-| `disbursements` | accounting-service | MEDIUM |
-| `business_settings` | settings-service | MEDIUM |
-| `notifications` | notification-service | LOW |
-| `banners` | cms-service | LOW |
+| `purchase_returns` | Purchase returns | HIGH |
+| `purchase_payments` | Purchase payments | HIGH |
+| `orders`, `order_details` | Order lifecycle | HIGH |
+| `carts`, `coupons` | Cart and coupon APIs | MEDIUM |
+| `account_ledgers`, `account_journal_entries`, `expenses` | Accounting APIs | MEDIUM |
+| `wallet_transactions`, `disbursements` | Wallet and disbursement APIs | MEDIUM |
+| `business_settings` | Business settings APIs | MEDIUM |
+| `notifications`, `banners` | Notifications and CMS APIs | LOW |
 
 ---
 

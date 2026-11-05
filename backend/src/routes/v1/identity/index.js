@@ -15,50 +15,54 @@ const {
   deliverymanAuth: deliverymanMiddleware,
   warehouseAuth: warehouseMiddleware,
 } = require('../../../middleware/auth');
+const { checkRole } = require('../../../middleware/auth');
+const { authLimiter } = require('../../../middleware/rateLimiter');
+
+const adminOnly = [adminMiddleware, checkRole('admin')];
 
 // Admin auth
-router.post('/admin/auth/login', adminAuth.login);
-router.post('/admin/auth/register', adminAuth.register);
-router.get('/admin/auth/me', adminMiddleware, adminAuth.me);
-router.post('/admin/auth/logout', adminMiddleware, adminAuth.logout);
+router.post('/admin/auth/login', authLimiter, adminAuth.login);
+router.post('/admin/auth/register', authLimiter, adminAuth.register);
+router.get('/admin/auth/me', adminOnly, adminAuth.me);
+router.post('/admin/auth/logout', adminOnly, adminAuth.logout);
 
 // Admins
-router.get('/admin/admins', adminMiddleware, admins.getAll);
-router.post('/admin/admins', adminMiddleware, admins.create);
-router.get('/admin/admins/:id', adminMiddleware, admins.getOne);
-router.put('/admin/admins/:id', adminMiddleware, admins.update);
-router.patch('/admin/admins/:id/status', adminMiddleware, admins.updateStatus);
-router.delete('/admin/admins/:id', adminMiddleware, admins.remove);
+router.get('/admin/admins', adminOnly, admins.getAll);
+router.post('/admin/admins', adminOnly, admins.create);
+router.get('/admin/admins/:id', adminOnly, admins.getOne);
+router.put('/admin/admins/:id', adminOnly, admins.update);
+router.patch('/admin/admins/:id/status', adminOnly, admins.updateStatus);
+router.delete('/admin/admins/:id', adminOnly, admins.remove);
 
 // Roles
-router.get('/admin/roles', adminMiddleware, roles.getAll);
-router.post('/admin/roles', adminMiddleware, roles.create);
-router.get('/admin/roles/:id', adminMiddleware, roles.getOne);
-router.put('/admin/roles/:id', adminMiddleware, roles.update);
-router.delete('/admin/roles/:id', adminMiddleware, roles.remove);
+router.get('/admin/roles', adminOnly, roles.getAll);
+router.post('/admin/roles', adminOnly, roles.create);
+router.get('/admin/roles/:id', adminOnly, roles.getOne);
+router.put('/admin/roles/:id', adminOnly, roles.update);
+router.delete('/admin/roles/:id', adminOnly, roles.remove);
 
 // Customer auth
-router.post('/customer/auth/login', customerAuth.login);
-router.post('/customer/auth/register', customerAuth.register);
+router.post('/customer/auth/login', authLimiter, customerAuth.login);
+router.post('/customer/auth/register', authLimiter, customerAuth.register);
 router.get('/customer/auth/me', customerMiddleware, customerAuth.me);
 
 // Vendor auth
-router.post('/vendor/auth/login', vendorAuth.login);
+router.post('/vendor/auth/login', authLimiter, vendorAuth.login);
 router.get('/vendor/auth/me', vendorMiddleware, vendorAuth.me);
 router.post('/vendor/auth/logout', vendorMiddleware, vendorAuth.logout);
 
 // Supplier auth
-router.post('/supplier/auth/login', supplierAuth.login);
+router.post('/supplier/auth/login', authLimiter, supplierAuth.login);
 router.get('/supplier/auth/me', supplierMiddleware, supplierAuth.me);
 router.post('/supplier/auth/logout', supplierMiddleware, supplierAuth.logout);
 
 // Deliveryman auth
-router.post('/deliveryman/auth/login', deliverymanAuth.login);
+router.post('/deliveryman/auth/login', authLimiter, deliverymanAuth.login);
 router.get('/deliveryman/auth/me', deliverymanMiddleware, deliverymanAuth.me);
 router.post('/deliveryman/auth/logout', deliverymanMiddleware, deliverymanAuth.logout);
 
 // Warehouse auth
-router.post('/warehouse/auth/login', warehouseAuth.login);
+router.post('/warehouse/auth/login', authLimiter, warehouseAuth.login);
 router.get('/warehouse/auth/me', warehouseMiddleware, warehouseAuth.me);
 router.post('/warehouse/auth/logout', warehouseMiddleware, warehouseAuth.logout);
 

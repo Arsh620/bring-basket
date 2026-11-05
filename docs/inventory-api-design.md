@@ -52,10 +52,11 @@ schema reference only; this design does not migrate its records.
 | 2 | Stock Movements | ❌ | ❌ |
 | 2 | Stock Transfers (warehouse ↔ warehouse) | ❌ | ❌ |
 | 2 | Batch Write-offs | ❌ | ❌ |
-| 3 | Purchase Vendors | ❌ | ❌ |
-| 3 | Purchase Orders | ❌ | ❌ |
-| 3 | Purchase Bills / GRN | ❌ | ❌ |
-| 3 | Purchase Returns & Payments | ❌ | ❌ |
+| 3 | Purchase Vendors | ✅ CRUD, filters, status + approval | ❌ |
+| 3 | Purchase Orders | ✅ CRUD, filters, issue + cancel | ❌ |
+| 3 | Purchase Bills / GRN | ✅ PO conversion, detail, guarded edit/void, stock receipt + invoice | ✅ Bill detail, edit/void, warehouse selection and GRN invoice |
+| 3 | Purchase Returns | ❌ | ❌ |
+| 3 | Purchase Payments | ✅ list, record, delete + bill settlement | ✅ payment list, filters, record/delete and bill history |
 | 4 | Vendor Employee auth + CRUD | ❌ | ❌ |
 | 4 | Delivery Man CRUD | ❌ | ❌ |
 | 5 | Frontend — Stores & Modules pages | ✅ Backend | ❌ |
@@ -77,6 +78,36 @@ The following module is already live in the codebase and should be treated as ca
   - `PATCH /admin/store-stock-requests/:id/dispatch`
   - `PATCH /admin/store-stock-requests/:id/receive`
   - `PATCH /admin/store-stock-requests/:id/reject`
+- Purchase vendor administration
+  - `GET /admin/purchases/vendors` (search, approval/status/warehouse filters, pagination)
+  - `GET|POST /admin/purchases/vendors`
+  - `GET|PUT|DELETE /admin/purchases/vendors/:id`
+  - `PATCH /admin/purchases/vendors/:id/status`
+  - `PATCH /admin/purchases/vendors/:id/approval`
+- Purchase order administration
+  - `GET|POST /admin/purchases/orders`
+  - `GET|PUT /admin/purchases/orders/:id`
+  - `POST /admin/purchases/orders/:id/issue`
+  - `POST /admin/purchases/orders/:id/cancel`
+- Purchase bills and warehouse GRN
+  - `POST /admin/purchases/orders/:id/convert-to-bill` (optionally bill selected remaining PO quantities)
+  - `GET /admin/purchases/bills` (status, vendor, order, warehouse, store and receipt filters)
+  - `GET /admin/purchases/bills/:id`
+  - `PUT /admin/purchases/bills/:id` (editable bill metadata only; blocked for received, paid, void, or returned bills)
+  - `POST /admin/purchases/bills/:id/void` (blocked for paid, returned, or stock-received bills)
+  - `GET /admin/purchases/bills/:id/grn-invoice` (admin-authenticated invoice download)
+  - `POST /admin/purchases/bills/:id/mark-stock-received` (requires a quantity for every bill line; supports short receipts, warehouse selection, and an optional invoice upload; stock is applied once)
+- Purchase payments
+  - `GET /admin/purchases/payments` (paginated; optional vendor, bill and date filters)
+  - `POST /admin/purchases/payments` (records a bill-allocated or unallocated vendor payment; rejects draft/void bills and amounts above the current balance)
+  - `DELETE /admin/purchases/payments/:id` (deletes payment and recalculates the linked bill status and balance)
+
+GRN invoice uploads are stored under `backend/storage/purchase-bill-invoices/` for
+local development only. The directory is ignored by Git, downloads require admin
+authentication, and upload size/type are restricted. The API rejects local
+invoice storage when `NODE_ENV=production`; configure private durable object
+storage before enabling this workflow in production. MongoDB must run as a
+replica set for the stock-receipt transaction.
 
 ---
 

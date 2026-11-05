@@ -18,10 +18,9 @@ const vendorSchema = new mongoose.Schema({
   authToken:      { type: String },
 }, { timestamps: true });
 
-vendorSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) return next();
+vendorSchema.pre('save', async function () {
+  if (!this.isModified('password')) return;
   this.password = await bcrypt.hash(this.password, 10);
-  next();
 });
 
 vendorSchema.methods.matchPassword = function (entered) {

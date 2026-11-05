@@ -1,6 +1,6 @@
 # Backend Restructure
 
-**Status:** ✅ Complete
+**Status:** ✅ Structure Complete — System Hardening Pending (see [system-hardening-plan.md](./system-hardening-plan.md))
 
 ## Structure decision
 

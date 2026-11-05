@@ -6,42 +6,45 @@ const stockTransfers = require('../../../domains/inventory/stock-transfers.contr
 const storeStockRequests = require('../../../domains/inventory/store-stock-requests.controller');
 const batchWriteOffs = require('../../../domains/inventory/batch-write-offs.controller');
 const { adminAuth } = require('../../../middleware/auth');
+const { checkRole } = require('../../../middleware/roleCheck');
+
+const adminOnly = [adminAuth, checkRole('admin')];
 
 // Warehouses
-router.get('/warehouses', adminAuth, warehouses.getAll);
-router.post('/warehouses', adminAuth, warehouses.create);
-router.get('/warehouses/:id', adminAuth, warehouses.getOne);
-router.put('/warehouses/:id', adminAuth, warehouses.update);
-router.patch('/warehouses/:id/status', adminAuth, warehouses.updateStatus);
-router.delete('/warehouses/:id', adminAuth, warehouses.remove);
+router.get('/warehouses', adminOnly, warehouses.getAll);
+router.post('/warehouses', adminOnly, warehouses.create);
+router.get('/warehouses/:id', adminOnly, warehouses.getOne);
+router.put('/warehouses/:id', adminOnly, warehouses.update);
+router.patch('/warehouses/:id/status', adminOnly, warehouses.updateStatus);
+router.delete('/warehouses/:id', adminOnly, warehouses.remove);
 
 // Warehouse Stock
-router.get('/warehouses/:id/stock', adminAuth, warehouseStock.getStock);
-router.put('/warehouses/:id/stock/:itemId', adminAuth, warehouseStock.setStock);
-router.patch('/warehouses/:id/stock/:itemId/adjust', adminAuth, warehouseStock.adjustStock);
+router.get('/warehouses/:id/stock', adminOnly, warehouseStock.getStock);
+router.put('/warehouses/:id/stock/:itemId', adminOnly, warehouseStock.setStock);
+router.patch('/warehouses/:id/stock/:itemId/adjust', adminOnly, warehouseStock.adjustStock);
 
 // Stock Movements
-router.get('/stock-movements', adminAuth, stockMovements.getAll);
+router.get('/stock-movements', adminOnly, stockMovements.getAll);
 
 // Stock Transfers
-router.get('/stock-transfers', adminAuth, stockTransfers.getAll);
-router.post('/stock-transfers', adminAuth, stockTransfers.create);
-router.get('/stock-transfers/:id', adminAuth, stockTransfers.getOne);
-router.patch('/stock-transfers/:id/dispatch', adminAuth, stockTransfers.dispatch);
-router.patch('/stock-transfers/:id/receive', adminAuth, stockTransfers.receive);
-router.patch('/stock-transfers/:id/reject', adminAuth, stockTransfers.reject);
+router.get('/stock-transfers', adminOnly, stockTransfers.getAll);
+router.post('/stock-transfers', adminOnly, stockTransfers.create);
+router.get('/stock-transfers/:id', adminOnly, stockTransfers.getOne);
+router.patch('/stock-transfers/:id/dispatch', adminOnly, stockTransfers.dispatch);
+router.patch('/stock-transfers/:id/receive', adminOnly, stockTransfers.receive);
+router.patch('/stock-transfers/:id/reject', adminOnly, stockTransfers.reject);
 
 // Store Stock Requests
-router.get('/store-stock-requests', adminAuth, storeStockRequests.getAll);
-router.post('/store-stock-requests', adminAuth, storeStockRequests.create);
-router.get('/store-stock-requests/:id', adminAuth, storeStockRequests.getOne);
-router.patch('/store-stock-requests/:id/approve', adminAuth, storeStockRequests.approve);
-router.patch('/store-stock-requests/:id/dispatch', adminAuth, storeStockRequests.dispatch);
-router.patch('/store-stock-requests/:id/receive', adminAuth, storeStockRequests.receive);
-router.patch('/store-stock-requests/:id/reject', adminAuth, storeStockRequests.reject);
+router.get('/store-stock-requests', adminOnly, storeStockRequests.getAll);
+router.post('/store-stock-requests', adminOnly, storeStockRequests.create);
+router.get('/store-stock-requests/:id', adminOnly, storeStockRequests.getOne);
+router.patch('/store-stock-requests/:id/approve', adminOnly, storeStockRequests.approve);
+router.patch('/store-stock-requests/:id/dispatch', adminOnly, storeStockRequests.dispatch);
+router.patch('/store-stock-requests/:id/receive', adminOnly, storeStockRequests.receive);
+router.patch('/store-stock-requests/:id/reject', adminOnly, storeStockRequests.reject);
 
 // Batch Write-offs
-router.get('/batch-write-offs', adminAuth, batchWriteOffs.getAll);
-router.post('/batch-write-offs', adminAuth, batchWriteOffs.create);
+router.get('/batch-write-offs', adminOnly, batchWriteOffs.getAll);
+router.post('/batch-write-offs', adminOnly, batchWriteOffs.create);
 
 module.exports = router;

@@ -1,89 +1,36 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const catalogRoutes = require('../src/routes/v1/catalog');
 const { adminAuth } = require('../src/middleware/auth');
 
-const routeCases = [
-  {
-    name: 'brands',
-    oldRoutes: '../src/routes/v1/admin/brand.routes',
-    newRoutes: '../src/domains/catalog/brands.routes',
-    oldController: '../src/controllers/admin/catalog/brand.controller',
-    newController: '../src/domains/catalog/brands.controller',
-    expected: [
-      ['GET', '/'],
-      ['POST', '/'],
-      ['PUT', '/:id'],
-      ['DELETE', '/:id'],
-      ['PATCH', '/:id/status'],
-    ],
-  },
-  {
-    name: 'items',
-    oldRoutes: '../src/routes/v1/admin/item.routes',
-    newRoutes: '../src/domains/catalog/items.routes',
-    oldController: '../src/controllers/admin/catalog/item.controller',
-    newController: '../src/domains/catalog/items.controller',
-    expected: [
-      ['GET', '/'],
-      ['GET', '/low-stock'],
-      ['GET', '/:id'],
-      ['POST', '/'],
-      ['PUT', '/:id'],
-      ['DELETE', '/:id'],
-      ['PATCH', '/:id/stock'],
-      ['PATCH', '/:id/status'],
-    ],
-  },
-  {
-    name: 'units',
-    oldRoutes: '../src/routes/v1/admin/unit.routes',
-    newRoutes: '../src/domains/catalog/units.routes',
-    oldController: '../src/controllers/admin/catalog/unit.controller',
-    newController: '../src/domains/catalog/units.controller',
-    expected: [
-      ['GET', '/'],
-      ['POST', '/'],
-      ['GET', '/:id'],
-      ['PUT', '/:id'],
-      ['DELETE', '/:id'],
-    ],
-  },
-  {
-    name: 'unit groups',
-    oldRoutes: '../src/routes/v1/admin/unit-group.routes',
-    newRoutes: '../src/domains/catalog/unit-groups.routes',
-    oldController: '../src/controllers/admin/catalog/unit-group.controller',
-    newController: '../src/domains/catalog/unit-groups.controller',
-    expected: [
-      ['GET', '/'],
-      ['POST', '/'],
-      ['GET', '/:id'],
-      ['PUT', '/:id'],
-      ['PATCH', '/:id/status'],
-      ['DELETE', '/:id'],
-      ['GET', '/:id/conversions'],
-      ['POST', '/:id/conversions'],
-      ['PUT', '/:id/conversions/:conversionId'],
-      ['DELETE', '/:id/conversions/:conversionId'],
-    ],
-    authenticated: true,
-  },
-];
+const routeEntries = (router) => router.stack
+  .filter((layer) => layer.route)
+  .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path]);
 
-for (const routeCase of routeCases) {
-  test(`${routeCase.name} API keeps its routes and compatibility adapters`, () => {
-    const oldRoutes = require(routeCase.oldRoutes);
-    const domainRoutes = require(routeCase.newRoutes);
-    assert.equal(oldRoutes, domainRoutes);
-    assert.equal(require(routeCase.oldController), require(routeCase.newController));
+test('catalog endpoints stay registered under the versioned admin route group', () => {
+  const expected = [
+    ['GET', '/brands'], ['POST', '/brands'], ['PUT', '/brands/:id'],
+    ['PATCH', '/brands/:id/status'], ['DELETE', '/brands/:id'],
+    ['GET', '/categories'], ['GET', '/categories/:id'], ['POST', '/categories'],
+    ['PUT', '/categories/:id'], ['PATCH', '/categories/:id/status'], ['DELETE', '/categories/:id'],
+    ['GET', '/items'], ['GET', '/items/low-stock'], ['GET', '/items/:id'],
+    ['POST', '/items'], ['PUT', '/items/:id'], ['PATCH', '/items/:id/status'],
+    ['PATCH', '/items/:id/stock'], ['DELETE', '/items/:id'],
+    ['GET', '/units'], ['GET', '/units/:id'], ['POST', '/units'],
+    ['PUT', '/units/:id'], ['DELETE', '/units/:id'],
+    ['GET', '/unit-groups'], ['GET', '/unit-groups/:id'], ['POST', '/unit-groups'],
+    ['PUT', '/unit-groups/:id'], ['PATCH', '/unit-groups/:id/status'],
+    ['DELETE', '/unit-groups/:id'], ['GET', '/unit-groups/:id/conversions'],
+    ['POST', '/unit-groups/:id/conversions'],
+    ['PUT', '/unit-groups/:id/conversions/:conversionId'],
+    ['DELETE', '/unit-groups/:id/conversions/:conversionId'],
+    ['GET', '/item-batches/expiring-soon'], ['GET', '/item-batches'],
+    ['GET', '/item-batches/:id'], ['POST', '/item-batches'],
+    ['PUT', '/item-batches/:id'], ['DELETE', '/item-batches/:id'],
+  ];
 
-    const actual = domainRoutes.stack
-      .filter((layer) => layer.route)
-      .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path]);
-    assert.deepEqual(actual, routeCase.expected);
-
-    if (routeCase.authenticated) {
-      assert.equal(domainRoutes.stack[0].handle, adminAuth);
-    }
-  });
-}
+  assert.deepEqual(routeEntries(catalogRoutes), expected);
+  for (const layer of catalogRoutes.stack.filter((entry) => entry.route)) {
+    assert.equal(layer.route.stack[0].handle, adminAuth, `${layer.route.path} must require admin authentication`);
+  }
+});

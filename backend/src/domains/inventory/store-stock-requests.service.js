@@ -101,7 +101,6 @@ const dispatchRequest = async (id, items, actor = {}) => {
   if (!['approved', 'requested'].includes(request.status)) {
     throw new AppError(`Cannot dispatch — status is ${request.status}`, 400);
   }
-
   if (!Array.isArray(items) || items.length === 0) throw new AppError('items with qtySent required', 400);
 
   for (const sentItem of items) {
@@ -110,42 +109,57 @@ const dispatchRequest = async (id, items, actor = {}) => {
     if (Number(sentItem.qtySent) > reqItem.qtyRequested) {
       throw new AppError(`qtySent cannot exceed qtyRequested for item ${sentItem.itemId}`, 400);
     }
-
     const stock = await WarehouseItemStock.findOne({
       warehouseId: request.motherWarehouseId,
       itemId: sentItem.itemId,
       variant: '',
     });
-
     if (!stock || stock.qty < Number(sentItem.qtySent)) {
       throw new AppError(`Insufficient warehouse stock for item ${sentItem.itemId}`, 400);
     }
-
-    stock.qty -= Number(sentItem.qtySent);
-    await stock.save();
-
-    await WarehouseStockMovement.create({
-      warehouseId: request.motherWarehouseId,
-      itemId: sentItem.itemId,
-      qtyChange: -Number(sentItem.qtySent),
-      balanceAfter: stock.qty,
-      type: 'store_dispatch',
-      referenceType: 'StoreStockRequest',
-      referenceId: request._id,
-      referenceNo: request.poNumber,
-      storeId: request.storeId,
-      actorType: actor?.role,
-      actorId: actor?.id,
-      movedAt: new Date(),
-    });
-
-    reqItem.qtySent = Number(sentItem.qtySent);
   }
 
-  request.status = 'dispatched';
-  request.dispatchedAt = new Date();
-  await request.save();
-  return request;
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    for (const sentItem of items) {
+      const reqItem = request.items.find((item) => item.itemId.toString() === sentItem.itemId?.toString());
+      const stock = await WarehouseItemStock.findOne({
+        warehouseId: request.motherWarehouseId,
+        itemId: sentItem.itemId,
+        variant: '',
+      }).session(session);
+
+      stock.qty -= Number(sentItem.qtySent);
+      await stock.save({ session });
+      await WarehouseStockMovement.create([{
+        warehouseId: request.motherWarehouseId,
+        itemId: sentItem.itemId,
+        qtyChange: -Number(sentItem.qtySent),
+        balanceAfter: stock.qty,
+        type: 'store_dispatch',
+        referenceType: 'StoreStockRequest',
+        referenceId: request._id,
+        referenceNo: request.poNumber,
+        storeId: request.storeId,
+        actorType: actor?.role,
+        actorId: actor?.id,
+        movedAt: new Date(),
+      }], { session });
+      reqItem.qtySent = Number(sentItem.qtySent);
+    }
+
+    request.status = 'dispatched';
+    request.dispatchedAt = new Date();
+    await request.save({ session });
+    await session.commitTransaction();
+    return request;
+  } catch (err) {
+    await session.abortTransaction();
+    throw err;
+  } finally {
+    session.endSession();
+  }
 };
 
 const receiveRequest = async (id, items, grnNumber, grnPath) => {
@@ -154,7 +168,6 @@ const receiveRequest = async (id, items, grnNumber, grnPath) => {
   const request = await StoreStockRequest.findById(id);
   if (!request) throw new AppError('Not found', 404);
   if (request.status !== 'dispatched') throw new AppError(`Cannot receive — status is ${request.status}`, 400);
-
   if (!Array.isArray(items) || items.length === 0) throw new AppError('items with qtyReceived required', 400);
 
   for (const recItem of items) {
@@ -166,23 +179,36 @@ const receiveRequest = async (id, items, grnNumber, grnPath) => {
     if (Number(recItem.qtyReceived) > reqItem.qtySent) {
       throw new AppError(`qtyReceived cannot exceed qtySent for item ${recItem.itemId}`, 400);
     }
-
-    const stockContext = await catalogItemService.getStockContext(recItem.itemId);
-    if (!stockContext) throw new AppError('Item not found', 404);
-    await storeStockService.changeStoreItemStock(
-      stockContext,
-      Number(recItem.qtyReceived),
-      request.storeId,
-    );
-    reqItem.qtyReceived = Number(recItem.qtyReceived);
   }
 
-  request.status = 'received';
-  request.receivedAt = new Date();
-  if (grnNumber) request.grnNumber = grnNumber;
-  if (grnPath) request.grnPath = grnPath;
-  await request.save();
-  return request;
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    for (const recItem of items) {
+      const reqItem = request.items.find((item) => item.itemId.toString() === recItem.itemId?.toString());
+      const stockContext = await catalogItemService.getStockContext(recItem.itemId);
+      if (!stockContext) throw new AppError('Item not found', 404);
+      await storeStockService.changeStoreItemStock(
+        stockContext,
+        Number(recItem.qtyReceived),
+        request.storeId,
+      );
+      reqItem.qtyReceived = Number(recItem.qtyReceived);
+    }
+
+    request.status = 'received';
+    request.receivedAt = new Date();
+    if (grnNumber) request.grnNumber = grnNumber;
+    if (grnPath) request.grnPath = grnPath;
+    await request.save({ session });
+    await session.commitTransaction();
+    return request;
+  } catch (err) {
+    await session.abortTransaction();
+    throw err;
+  } finally {
+    session.endSession();
+  }
 };
 
 const rejectRequest = async (id, rejectReason) => {

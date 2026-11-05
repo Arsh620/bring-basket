@@ -1,0 +1,4 @@
+storage/purchase-bill-invoices/
+logs/
+.env
+node_modules/

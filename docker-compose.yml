@@ -1,0 +1,295 @@
+services:
+
+  # ── MongoDB ────────────────────────────────────────────────────────────────
+  mongo:
+    image: mongo:7
+    container_name: bb_mongo
+    restart: unless-stopped
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: bring_basket
+    healthcheck:
+      test: ["CMD", "mongosh", "--quiet", "--eval", "try { if (rs.status().ok === 1 && db.hello().isWritablePrimary) quit(0); } catch (error) { try { rs.initiate({_id:'rs0',members:[{_id:0,host:'mongo:27017'}]}); } catch (initError) {} } quit(1);"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    networks:
+      - bb_network
+
+  # ── Redis ──────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    container_name: bb_redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    command: redis-server --maxmemory 100mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bb_network
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: bb_backend
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      NODE_ENV: production
+      PORT: 5000
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3001},http://localhost:3001,http://127.0.0.1:3001"
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    volumes:
+      - backend_storage:/app/storage
+      - backend_logs:/app/logs
+    networks:
+      - bb_network
+
+  # ── Identity service ────────────────────────────────────────────────────────
+  identity:
+    build:
+      context: .
+      dockerfile: identity-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5001"
+    environment:
+      NODE_ENV: production
+      PORT: 5001
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Catalog service ─────────────────────────────────────────────────────────
+  catalog:
+    build:
+      context: .
+      dockerfile: catalog-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5002"
+    environment:
+      NODE_ENV: production
+      PORT: 5002
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5002/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Store service ──────────────────────────────────────────────────────────
+  store:
+    build:
+      context: .
+      dockerfile: store-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5003"
+    environment:
+      NODE_ENV: production
+      PORT: 5003
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5003/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Inventory service ──────────────────────────────────────────────────────
+  inventory:
+    build:
+      context: .
+      dockerfile: inventory-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5004"
+    environment:
+      NODE_ENV: production
+      PORT: 5004
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5004/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Procurement service ────────────────────────────────────────────────────
+  procurement:
+    build:
+      context: .
+      dockerfile: procurement-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5005"
+    environment:
+      NODE_ENV: production
+      PORT: 5005
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5005/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Gateway ────────────────────────────────────────────────────────────────
+  gateway:
+    build:
+      context: ./gateway
+      dockerfile: Dockerfile
+    container_name: bb_gateway
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      JWT_SECRET: ${JWT_SECRET}
+      REDIS_URL: redis://redis:6379
+      ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3001},http://localhost:3001,http://127.0.0.1:3001"
+      IDENTITY_SERVICE_URL: http://identity:5001
+      CATALOG_SERVICE_URL: http://catalog:5002
+      STORE_SERVICE_URL: http://store:5003
+      INVENTORY_SERVICE_URL: http://inventory:5004
+      PROCUREMENT_SERVICE_URL: http://procurement:5005
+      ORDER_SERVICE_URL: http://backend:5000
+      ACCOUNTING_SERVICE_URL: http://backend:5000
+      NOTIFICATION_SERVICE_URL: http://backend:5000
+      SETTINGS_SERVICE_URL: http://backend:5000
+    depends_on:
+      backend:
+        condition: service_healthy
+      identity:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      store:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+      procurement:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:3000/api/v1
+    container_name: bb_frontend
+    restart: unless-stopped
+    ports:
+      - "3001:3000"
+    environment:
+      NODE_ENV: production
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - bb_network
+
+volumes:
+  mongo_data:
+  redis_data:
+  backend_storage:
+  backend_logs:
+
+networks:
+  bb_network:
+    driver: bridge

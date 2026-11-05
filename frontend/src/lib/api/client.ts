@@ -18,7 +18,7 @@ api.interceptors.response.use(
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
       localStorage.removeItem('admin_token');
-      window.location.href = '/admin/login';
+      window.dispatchEvent(new Event('admin:unauthorized'));
     }
     return Promise.reject(err);
   }

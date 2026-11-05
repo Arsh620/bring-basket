@@ -94,7 +94,6 @@ const dispatch = async (id, { items, challanNumber, notes }, actor = {}) => {
     if (Number(sentItem.qtySent) > transferItem.qtyRequested) {
       throw new AppError(`qtySent cannot exceed qtyRequested for item ${sentItem.itemId}`, 400);
     }
-
     const stock = await WarehouseItemStock.findOne({
       warehouseId: transfer.motherWarehouseId,
       itemId: sentItem.itemId,
@@ -103,31 +102,52 @@ const dispatch = async (id, { items, challanNumber, notes }, actor = {}) => {
     if (!stock || stock.qty < Number(sentItem.qtySent)) {
       throw new AppError(`Insufficient stock in mother warehouse for item ${sentItem.itemId}`, 400);
     }
-
-    stock.qty -= Number(sentItem.qtySent);
-    await stock.save();
-    await WarehouseStockMovement.create({
-      warehouseId: transfer.motherWarehouseId,
-      itemId: sentItem.itemId,
-      qtyChange: -Number(sentItem.qtySent),
-      balanceAfter: stock.qty,
-      type: 'transfer_out',
-      referenceType: 'WarehouseStockTransfer',
-      referenceId: transfer._id,
-      otherWarehouseId: transfer.subWarehouseId,
-      actorType: actor?.role,
-      actorId: actor?.id,
-      movedAt: new Date(),
-    });
-    transferItem.qtySent = Number(sentItem.qtySent);
   }
 
-  transfer.status = 'dispatched';
-  transfer.challanNumber = challanNumber;
-  if (notes) transfer.notes = notes;
-  transfer.dispatchedAt = new Date();
-  await transfer.save();
-  return transfer;
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    for (const sentItem of items) {
+      const transferItem = transfer.items.find(
+        (item) => item.itemId.toString() === sentItem.itemId?.toString(),
+      );
+      const stock = await WarehouseItemStock.findOne({
+        warehouseId: transfer.motherWarehouseId,
+        itemId: sentItem.itemId,
+        variant: sentItem.variant || '',
+      }).session(session);
+
+      stock.qty -= Number(sentItem.qtySent);
+      await stock.save({ session });
+      await WarehouseStockMovement.create([{
+        warehouseId: transfer.motherWarehouseId,
+        itemId: sentItem.itemId,
+        qtyChange: -Number(sentItem.qtySent),
+        balanceAfter: stock.qty,
+        type: 'transfer_out',
+        referenceType: 'WarehouseStockTransfer',
+        referenceId: transfer._id,
+        otherWarehouseId: transfer.subWarehouseId,
+        actorType: actor?.role,
+        actorId: actor?.id,
+        movedAt: new Date(),
+      }], { session });
+      transferItem.qtySent = Number(sentItem.qtySent);
+    }
+
+    transfer.status = 'dispatched';
+    transfer.challanNumber = challanNumber;
+    if (notes) transfer.notes = notes;
+    transfer.dispatchedAt = new Date();
+    await transfer.save({ session });
+    await session.commitTransaction();
+    return transfer;
+  } catch (err) {
+    await session.abortTransaction();
+    throw err;
+  } finally {
+    session.endSession();
+  }
 };
 
 const receive = async (id, actor = {}) => {
@@ -138,42 +158,43 @@ const receive = async (id, actor = {}) => {
     throw new AppError(`Cannot receive — status is ${transfer.status}`, 400);
   }
 
-  for (const transferItem of transfer.items) {
-    if (!transferItem.qtySent) continue;
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    for (const transferItem of transfer.items) {
+      if (!transferItem.qtySent) continue;
 
-    await WarehouseItemStock.findOneAndUpdate(
-      {
+      const updatedStock = await WarehouseItemStock.findOneAndUpdate(
+        { warehouseId: transfer.subWarehouseId, itemId: transferItem.itemId, variant: '' },
+        { $inc: { qty: transferItem.qtySent } },
+        { upsert: true, new: true, session },
+      );
+      await WarehouseStockMovement.create([{
         warehouseId: transfer.subWarehouseId,
         itemId: transferItem.itemId,
-        variant: '',
-      },
-      { $inc: { qty: transferItem.qtySent } },
-      { upsert: true, new: true },
-    );
-    const updatedStock = await WarehouseItemStock.findOne({
-      warehouseId: transfer.subWarehouseId,
-      itemId: transferItem.itemId,
-      variant: '',
-    });
-    await WarehouseStockMovement.create({
-      warehouseId: transfer.subWarehouseId,
-      itemId: transferItem.itemId,
-      qtyChange: transferItem.qtySent,
-      balanceAfter: updatedStock?.qty,
-      type: 'transfer_in',
-      referenceType: 'WarehouseStockTransfer',
-      referenceId: transfer._id,
-      otherWarehouseId: transfer.motherWarehouseId,
-      actorType: actor?.role,
-      actorId: actor?.id,
-      movedAt: new Date(),
-    });
-  }
+        qtyChange: transferItem.qtySent,
+        balanceAfter: updatedStock?.qty,
+        type: 'transfer_in',
+        referenceType: 'WarehouseStockTransfer',
+        referenceId: transfer._id,
+        otherWarehouseId: transfer.motherWarehouseId,
+        actorType: actor?.role,
+        actorId: actor?.id,
+        movedAt: new Date(),
+      }], { session });
+    }
 
-  transfer.status = 'received';
-  transfer.receivedAt = new Date();
-  await transfer.save();
-  return transfer;
+    transfer.status = 'received';
+    transfer.receivedAt = new Date();
+    await transfer.save({ session });
+    await session.commitTransaction();
+    return transfer;
+  } catch (err) {
+    await session.abortTransaction();
+    throw err;
+  } finally {
+    session.endSession();
+  }
 };
 
 const reject = async (id, rejectReason) => {

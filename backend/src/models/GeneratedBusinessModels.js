@@ -9,10 +9,16 @@ require('./catalog/ItemBatch');
 require('./catalog/Unit');
 require('./catalog/UnitGroup');
 require('./warehouse/Warehouse');
+require('./warehouse/WarehouseItemBatch');
 require('./warehouse/WarehouseItemStock');
 require('./warehouse/WarehouseStockMovement');
 require('./warehouse/WarehouseStockTransfer');
 require('./warehouse/StoreStockRequest');
+require('./purchase/PurchaseVendor');
+require('./purchase/PurchaseOrder');
+require('./purchase/PurchaseBill');
+require('./purchase/PurchasePayment');
+require('./purchase/PurchaseReturn');
 
 const definitions = {
   "account_journal_entries": {"modelName":"AccountJournalEntry","collection":"accountjournalentries","fields":{"legacyId":{"type":"Number","required":false},"entryDate":{"type":"Date","required":true},"voucherNo":{"type":"String","maxlength":255,"required":true},"sourceType":{"type":"String","maxlength":64,"required":false},"sourceId":{"type":"Number","required":false},"narration":{"type":"String","maxlength":255,"required":false},"createdAt":{"type":"Date","required":false},"updatedAt":{"type":"Date","required":false}},"indexes":[{"fields":{"legacyId":1},"unique":true,"name":null,"sourceColumns":["id"]},{"fields":{"voucherNo":1},"unique":true,"name":"account_journal_entries_voucher_no_unique","sourceColumns":["voucher_no"]},{"fields":{"sourceType":1,"sourceId":1},"unique":true,"name":"account_journal_entries_source_type_source_id_unique","sourceColumns":["source_type","source_id"]},{"fields":{"sourceType":1},"unique":false,"name":"account_journal_entries_source_type_index","sourceColumns":["source_type"]},{"fields":{"sourceId":1},"unique":false,"name":"account_journal_entries_source_id_index","sourceColumns":["source_id"]}]},

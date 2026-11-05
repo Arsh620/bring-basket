@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { buildCategoryFilter, parseStatus } = require('../src/domains/catalog/categories.validation');
-const categoryRoutes = require('../src/routes/v1/admin/category.routes');
+const catalogRoutes = require('../src/routes/v1/catalog');
 const errorHandler = require('../src/middleware/errorHandler');
 const AppError = require('../src/utils/AppError');
 
@@ -45,18 +45,20 @@ test('category filter rejects malformed status instead of silently filtering ina
   });
 });
 
-test('legacy category route keeps the existing REST endpoints', () => {
-  const routes = categoryRoutes.stack.map(({ route }) => [
+test('category API keeps its current REST endpoints', () => {
+  const routes = catalogRoutes.stack
+    .filter((layer) => layer.route && layer.route.path.startsWith('/categories'))
+    .map(({ route }) => [
     Object.keys(route.methods)[0].toUpperCase(),
-    route.path,
+    route.path.replace(/^\/categories/, '') || '/',
   ]);
   assert.deepEqual(routes, [
     ['GET', '/'],
     ['GET', '/:id'],
     ['POST', '/'],
     ['PUT', '/:id'],
-    ['DELETE', '/:id'],
     ['PATCH', '/:id/status'],
+    ['DELETE', '/:id'],
   ]);
 });
 

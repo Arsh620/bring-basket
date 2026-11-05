@@ -1,12 +1,9 @@
-const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const { registeredModels } = require('../../models/GeneratedBusinessModels');
+const { generateToken } = require('../../middleware/auth');
 const { success, error } = require('../../utils/response');
 
 const PurchaseVendor = registeredModels['purchase_vendors'];
-
-const generateToken = (id, role) =>
-  jwt.sign({ id, role }, process.env.JWT_SECRET, { expiresIn: process.env.JWT_EXPIRES_IN });
 
 exports.login = async (req, res, next) => {
   try {
@@ -15,7 +12,16 @@ exports.login = async (req, res, next) => {
 
     const supplier = await PurchaseVendor.findOne({ email, status: true }).select('+password');
     if (!supplier) return error(res, 'Invalid credentials', 401);
+    if (supplier.approvalStatus !== 'approved') {
+      return error(res, 'Supplier registration is not approved', 403);
+    }
+    if (supplier.portalStatus !== 'enabled') {
+      return error(res, 'Supplier portal is disabled', 403);
+    }
     if (!supplier.password) return error(res, 'Password not set. Please use set-password link.', 403);
+    if (!supplier.passwordSetAt) {
+      return error(res, 'Please set your password using the invitation link first', 403);
+    }
 
     const isMatch = await bcrypt.compare(password, supplier.password);
     if (!isMatch) return error(res, 'Invalid credentials', 401);

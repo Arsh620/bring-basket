@@ -1,129 +1,29 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const inventoryRoutes = require('../src/routes/v1/inventory');
 const { adminAuth } = require('../src/middleware/auth');
 
-test('store stock request legacy paths point to the inventory domain', () => {
-  const domainRoutes = require('../src/domains/inventory/store-stock-requests.routes');
-  const domainController = require('../src/domains/inventory/store-stock-requests.controller');
-  const domainService = require('../src/domains/inventory/store-stock-requests.service');
+const routeEntries = (router) => router.stack
+  .filter((layer) => layer.route)
+  .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path]);
 
-  assert.equal(require('../src/routes/v1/admin/store-stock-request.routes'), domainRoutes);
-  assert.equal(
-    require('../src/controllers/admin/warehouse/store-stock-request.controller'),
-    domainController,
-  );
-  assert.equal(
-    require('../src/services/warehouse/store-stock-request.service'),
-    domainService,
-  );
-
-  assert.deepEqual(
-    domainRoutes.stack
-      .filter((layer) => layer.route)
-      .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path]),
-    [
-      ['GET', '/'],
-      ['POST', '/'],
-      ['GET', '/:id'],
-      ['PATCH', '/:id/approve'],
-      ['PATCH', '/:id/dispatch'],
-      ['PATCH', '/:id/receive'],
-      ['PATCH', '/:id/reject'],
-    ],
-  );
-  assert.equal(domainRoutes.stack[0].handle, adminAuth);
+test('inventory endpoints stay registered under the versioned admin route group', () => {
+  assert.deepEqual(routeEntries(inventoryRoutes), [
+    ['GET', '/warehouses'], ['POST', '/warehouses'], ['GET', '/warehouses/:id'],
+    ['PUT', '/warehouses/:id'], ['PATCH', '/warehouses/:id/status'], ['DELETE', '/warehouses/:id'],
+    ['GET', '/warehouses/:id/stock'], ['PUT', '/warehouses/:id/stock/:itemId'],
+    ['PATCH', '/warehouses/:id/stock/:itemId/adjust'],
+    ['GET', '/stock-movements'],
+    ['GET', '/stock-transfers'], ['POST', '/stock-transfers'],
+    ['GET', '/stock-transfers/:id'], ['PATCH', '/stock-transfers/:id/dispatch'],
+    ['PATCH', '/stock-transfers/:id/receive'], ['PATCH', '/stock-transfers/:id/reject'],
+    ['GET', '/store-stock-requests'], ['POST', '/store-stock-requests'],
+    ['GET', '/store-stock-requests/:id'], ['PATCH', '/store-stock-requests/:id/approve'],
+    ['PATCH', '/store-stock-requests/:id/dispatch'], ['PATCH', '/store-stock-requests/:id/receive'],
+    ['PATCH', '/store-stock-requests/:id/reject'],
+    ['GET', '/batch-write-offs'], ['POST', '/batch-write-offs'],
+  ]);
+  for (const layer of inventoryRoutes.stack.filter((entry) => entry.route)) {
+    assert.equal(layer.route.stack[0].handle, adminAuth, `${layer.route.path} must require admin authentication`);
+  }
 });
-
-test('stock transfer legacy paths point to inventory domain and keep protected endpoints', () => {
-  const domainRoutes = require('../src/domains/inventory/stock-transfers.routes');
-  const domainController = require('../src/domains/inventory/stock-transfers.controller');
-
-  assert.equal(require('../src/routes/v1/admin/stock-transfer.routes'), domainRoutes);
-  assert.equal(
-    require('../src/controllers/admin/warehouse/transfer.controller'),
-    domainController,
-  );
-  assert.deepEqual(
-    domainRoutes.stack
-      .filter((layer) => layer.route)
-      .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path]),
-    [
-      ['GET', '/'],
-      ['POST', '/'],
-      ['GET', '/:id'],
-      ['PATCH', '/:id/dispatch'],
-      ['PATCH', '/:id/receive'],
-      ['PATCH', '/:id/reject'],
-    ],
-  );
-  assert.equal(domainRoutes.stack[0].handle, adminAuth);
-});
-
-const inventoryRouteCases = [
-  {
-    name: 'warehouses',
-    oldRoute: '../src/routes/v1/admin/warehouse.routes',
-    domainRoute: '../src/domains/inventory/warehouses.routes',
-    oldController: '../src/controllers/admin/warehouse/warehouse.controller',
-    domainController: '../src/domains/inventory/warehouses.controller',
-    routes: [
-      ['GET', '/'],
-      ['POST', '/'],
-      ['GET', '/:id'],
-      ['PUT', '/:id'],
-      ['PATCH', '/:id/status'],
-      ['DELETE', '/:id'],
-    ],
-  },
-  {
-    name: 'warehouse stock',
-    oldRoute: '../src/routes/v1/admin/warehouse-stock.routes',
-    domainRoute: '../src/domains/inventory/warehouse-stock.routes',
-    oldController: '../src/controllers/admin/warehouse/stock.controller',
-    domainController: '../src/domains/inventory/warehouse-stock.controller',
-    routes: [
-      ['GET', '/:id/stock'],
-      ['PUT', '/:id/stock/:itemId'],
-      ['PATCH', '/:id/stock/:itemId/adjust'],
-    ],
-    authenticated: true,
-  },
-  {
-    name: 'stock movements',
-    oldRoute: '../src/routes/v1/admin/stock-movement.routes',
-    domainRoute: '../src/domains/inventory/stock-movements.routes',
-    oldController: '../src/controllers/admin/warehouse/movement.controller',
-    domainController: '../src/domains/inventory/stock-movements.controller',
-    routes: [['GET', '/']],
-    authenticated: true,
-  },
-  {
-    name: 'batch write-offs',
-    oldRoute: '../src/routes/v1/admin/batch-write-off.routes',
-    domainRoute: '../src/domains/inventory/batch-write-offs.routes',
-    oldController: '../src/controllers/admin/warehouse/batch-write-off.controller',
-    domainController: '../src/domains/inventory/batch-write-offs.controller',
-    routes: [
-      ['GET', '/'],
-      ['POST', '/'],
-    ],
-    authenticated: true,
-  },
-];
-
-for (const routeCase of inventoryRouteCases) {
-  test(`${routeCase.name} API stays wired through the inventory domain`, () => {
-    const domainRoutes = require(routeCase.domainRoute);
-    assert.equal(require(routeCase.oldRoute), domainRoutes);
-    assert.equal(require(routeCase.oldController), require(routeCase.domainController));
-    assert.deepEqual(
-      domainRoutes.stack
-        .filter((layer) => layer.route)
-        .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path]),
-      routeCase.routes,
-    );
-    if (routeCase.authenticated) {
-      assert.equal(domainRoutes.stack[0].handle, adminAuth);
-    }
-  });
-}
