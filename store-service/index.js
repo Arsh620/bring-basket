@@ -14,6 +14,7 @@ require('./src/models/auth/Vendor');
 require('./src/models/store/Module');
 require('./src/models/store/Zone');
 require('./src/models/store/Store');
+require('./src/models/catalog/Item');
 
 const PORT = process.env.PORT || 5003;
 const app = express();
@@ -43,7 +44,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.use('/api/v1/admin', require('./src/routes/v1/store'));
+const storeRoutes = require('./src/routes/v1/store');
+app.use('/api/v1/admin', storeRoutes);
+app.use('/api/v1/customer', storeRoutes.customerRouter);
 app.use(errorHandler);
 
 const shutdown = async (signal) => {

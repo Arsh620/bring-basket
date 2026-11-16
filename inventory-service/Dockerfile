@@ -14,6 +14,7 @@ COPY backend/src/config/redis.js ./src/config/redis.js
 COPY backend/src/domains/catalog/items.service.js ./src/domains/catalog/items.service.js
 COPY backend/src/domains/inventory ./src/domains/inventory
 COPY backend/src/middleware/auth.js ./src/middleware/auth.js
+COPY backend/src/middleware/service-auth.js ./src/middleware/service-auth.js
 COPY backend/src/middleware/errorHandler.js ./src/middleware/errorHandler.js
 COPY backend/src/middleware/roleCheck.js ./src/middleware/roleCheck.js
 COPY backend/src/middleware/sanitize.js ./src/middleware/sanitize.js

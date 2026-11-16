@@ -5,8 +5,10 @@ const stockMovements = require('../../../domains/inventory/stock-movements.contr
 const stockTransfers = require('../../../domains/inventory/stock-transfers.controller');
 const storeStockRequests = require('../../../domains/inventory/store-stock-requests.controller');
 const batchWriteOffs = require('../../../domains/inventory/batch-write-offs.controller');
+const orderStockReservations = require('../../../domains/inventory/order-stock-reservations.controller');
 const { adminAuth } = require('../../../middleware/auth');
 const { checkRole } = require('../../../middleware/roleCheck');
+const orderServiceAuth = require('../../../middleware/service-auth')('order-service', 'inventory-service');
 
 const adminOnly = [adminAuth, checkRole('admin')];
 
@@ -47,4 +49,11 @@ router.patch('/store-stock-requests/:id/reject', adminOnly, storeStockRequests.r
 router.get('/batch-write-offs', adminOnly, batchWriteOffs.getAll);
 router.post('/batch-write-offs', adminOnly, batchWriteOffs.create);
 
+const internalRouter = require('express').Router();
+internalRouter.post('/:orderId/reserve', orderStockReservations.reserve);
+internalRouter.post('/:orderId/commit', orderStockReservations.commit);
+internalRouter.post('/:orderId/release', orderStockReservations.release);
+
+router.internalRouter = internalRouter;
+router.orderServiceAuth = orderServiceAuth;
 module.exports = router;

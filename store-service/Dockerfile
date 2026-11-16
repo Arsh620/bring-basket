@@ -17,6 +17,7 @@ COPY backend/src/middleware/errorHandler.js ./src/middleware/errorHandler.js
 COPY backend/src/middleware/roleCheck.js ./src/middleware/roleCheck.js
 COPY backend/src/middleware/sanitize.js ./src/middleware/sanitize.js
 COPY backend/src/models/auth/Vendor.js ./src/models/auth/Vendor.js
+COPY backend/src/models/catalog/Item.js ./src/models/catalog/Item.js
 COPY backend/src/models/store ./src/models/store
 COPY backend/src/routes/v1/store ./src/routes/v1/store
 COPY backend/src/utils ./src/utils

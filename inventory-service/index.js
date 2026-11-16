@@ -23,6 +23,8 @@ require('./src/models/warehouse/WarehouseItemStock');
 require('./src/models/warehouse/WarehouseStockMovement');
 require('./src/models/warehouse/WarehouseStockTransfer');
 require('./src/models/warehouse/StoreStockRequest');
+require('./src/models/warehouse/OrderStockReservation');
+require('./src/models/store/StoreStockMovement');
 
 const PORT = process.env.PORT || 5004;
 const app = express();
@@ -52,7 +54,9 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.use('/api/v1/admin', require('./src/routes/v1/inventory'));
+const inventoryRoutes = require('./src/routes/v1/inventory');
+app.use('/api/v1/admin', inventoryRoutes);
+app.use('/internal/order-stock', inventoryRoutes.orderServiceAuth, inventoryRoutes.internalRouter);
 app.use(errorHandler);
 
 const shutdown = async (signal) => {

@@ -2,6 +2,9 @@ const mongoose = require('mongoose');
 
 const returnItemSchema = new mongoose.Schema({
   itemId:       { type: mongoose.Schema.Types.ObjectId, ref: 'Item' },
+  purchaseBillItemId: { type: mongoose.Schema.Types.Mixed },
+  sourceType:   { type: String, enum: ['warehouse', 'store'] },
+  sourceId:     { type: mongoose.Schema.Types.Mixed },
   itemName:     { type: String, required: true },
   unitName:     { type: String },
   returnedQty:  { type: Number, required: true, min: 0 },
@@ -21,8 +24,8 @@ const purchaseReturnSchema = new mongoose.Schema({
   storeId:          { type: mongoose.Schema.Types.ObjectId, ref: 'Store' },
   warehouseId:      { type: mongoose.Schema.Types.ObjectId, ref: 'Warehouse' },
   returnDate:       { type: Date, required: true },
-  reason:           { type: String, enum: ['damaged', 'expired', 'wrong_item', 'excess', 'other'], default: 'damaged' },
-  status:           { type: String, enum: ['draft', 'completed', 'cancelled'], default: 'draft' },
+  reason:           { type: String, enum: ['damaged', 'expired', 'wrong_item', 'excess', 'defective', 'overstock', 'other'], default: 'damaged' },
+  status:           { type: String, enum: ['draft', 'completed', 'void', 'cancelled'], default: 'draft' },
   subTotal:         { type: Number, default: 0 },
   taxTotal:         { type: Number, default: 0 },
   totalAmount:      { type: Number, default: 0 },

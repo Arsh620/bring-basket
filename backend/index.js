@@ -22,6 +22,22 @@ app.use(cors({
   origin: process.env.ALLOWED_ORIGINS?.split(',') || 'http://localhost:3000',
   credentials: true,
 }));
+
+// Capture raw body for Razorpay webhook signature verification
+app.use((req, res, next) => {
+  if (req.originalUrl === '/api/v1/payment/razorpay/webhook') {
+    let data = '';
+    req.on('data', (chunk) => { data += chunk; });
+    req.on('end', () => {
+      req.rawBody = data;
+      try { req.body = JSON.parse(data); } catch { req.body = {}; }
+      next();
+    });
+  } else {
+    next();
+  }
+});
+
 app.use(express.json());
 app.use(mongoSanitize);
 app.use(globalLimiter);

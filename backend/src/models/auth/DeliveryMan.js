@@ -22,7 +22,12 @@ const deliveryManSchema = new mongoose.Schema({
   currentOrders:      { type: Number, default: 0 },
   orderCount:         { type: Number, default: 0 },
   assignedOrderCount: { type: Number, default: 0 },
+  walletBalance:      { type: Number, default: 0 },
+  pendingCash:        { type: Number, default: 0 },
   type:               { type: String, default: 'zone_wise' },
+  lastLatitude: { type: String },
+  lastLongitude: { type: String },
+  lastLocationAt: { type: Date },
   applicationStatus:  { type: String, enum: ['approved', 'denied', 'pending'], default: 'approved' },
 }, { timestamps: true });
 

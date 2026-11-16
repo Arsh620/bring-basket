@@ -49,6 +49,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/v1/admin', require('./src/routes/v1/catalog'));
+app.use('/api/v1/customer', require('./src/routes/v1/catalog/customer'));
 app.use(errorHandler);
 
 const shutdown = async (signal) => {

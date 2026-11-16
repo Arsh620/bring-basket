@@ -1,0 +1,159 @@
+const mongoose = require('mongoose');
+const DeliveryMan = require('../../models/auth/DeliveryMan');
+const Order = require('../orders/order.model');
+const Notification = require('../../models/auth/Notification');
+const { success, error, paginated } = require('../../utils/response');
+const { paginate } = require('../../utils/pagination');
+const { generateToken } = require('../../middleware/auth');
+
+// GET /deliveryman/profile
+exports.getProfile = async (req, res, next) => {
+  try {
+    const dm = await DeliveryMan.findById(req.user.id).lean();
+    if (!dm) return error(res, 'Not found', 404);
+    return success(res, dm);
+  } catch (err) { next(err); }
+};
+
+// PUT /deliveryman/update-profile
+exports.updateProfile = async (req, res, next) => {
+  try {
+    const { fName, lName, email, image, fcmToken } = req.body;
+    const dm = await DeliveryMan.findByIdAndUpdate(
+      req.user.id,
+      { fName, lName, email, image, fcmToken },
+      { new: true, runValidators: true },
+    );
+    return success(res, dm);
+  } catch (err) { next(err); }
+};
+
+// POST /deliveryman/update-active-status  body: { active }
+exports.updateActiveStatus = async (req, res, next) => {
+  try {
+    const dm = await DeliveryMan.findByIdAndUpdate(req.user.id, { active: req.body.active }, { new: true });
+    return success(res, { active: dm.active });
+  } catch (err) { next(err); }
+};
+
+// PUT /deliveryman/update-fcm-token  body: { fcm_token }
+exports.updateFcmToken = async (req, res, next) => {
+  try {
+    if (!req.body.fcm_token) return error(res, 'fcm_token is required', 400);
+    await DeliveryMan.findByIdAndUpdate(req.user.id, { fcmToken: req.body.fcm_token });
+    return success(res, null, 'FCM token updated');
+  } catch (err) { next(err); }
+};
+
+// GET /deliveryman/current-orders
+exports.getCurrentOrders = async (req, res, next) => {
+  try {
+    const orders = await Order.find({
+      deliverymanId: req.user.id,
+      orderStatus: { $in: ['confirmed', 'processing', 'handover', 'picked_up'] },
+    }).sort({ createdAt: -1 }).lean();
+    return success(res, orders);
+  } catch (err) { next(err); }
+};
+
+// GET /deliveryman/all-orders?limit=&page=
+exports.getAllOrders = async (req, res, next) => {
+  try {
+    const { skip, page, limit } = paginate(req.query);
+    const filter = { deliverymanId: new mongoose.Types.ObjectId(req.user.id) };
+    const [orders, total] = await Promise.all([
+      Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Order.countDocuments(filter),
+    ]);
+    return paginated(res, orders, total, page, limit);
+  } catch (err) { next(err); }
+};
+
+// GET /deliveryman/order-delivery-history?limit=&page=
+exports.getOrderHistory = async (req, res, next) => {
+  try {
+    const { skip, page, limit } = paginate(req.query);
+    const filter = { deliverymanId: new mongoose.Types.ObjectId(req.user.id), orderStatus: 'delivered' };
+    const [orders, total] = await Promise.all([
+      Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Order.countDocuments(filter),
+    ]);
+    return paginated(res, orders, total, page, limit);
+  } catch (err) { next(err); }
+};
+
+// GET /deliveryman/order?order_id=
+exports.getOrder = async (req, res, next) => {
+  try {
+    if (!req.query.order_id) return error(res, 'order_id is required', 400);
+    const order = await Order.findOne({ _id: req.query.order_id, deliverymanId: req.user.id }).lean();
+    if (!order) return error(res, 'Order not found', 404);
+    return success(res, order);
+  } catch (err) { next(err); }
+};
+
+// PUT /deliveryman/accept-order  body: { order_id }
+exports.acceptOrder = async (req, res, next) => {
+  try {
+    const { order_id } = req.body;
+    if (!order_id) return error(res, 'order_id is required', 400);
+    const order = await Order.findOneAndUpdate(
+      { _id: order_id, orderStatus: 'confirmed', deliverymanId: null },
+      { deliverymanId: req.user.id, orderStatus: 'processing' },
+      { new: true },
+    );
+    if (!order) return error(res, 'Order not available for acceptance', 409);
+    await DeliveryMan.findByIdAndUpdate(req.user.id, { $inc: { currentOrders: 1 } });
+    return success(res, order);
+  } catch (err) { next(err); }
+};
+
+// PUT /deliveryman/update-order-status  body: { order_id, status }
+exports.updateOrderStatus = async (req, res, next) => {
+  try {
+    const { order_id, status } = req.body;
+    if (!order_id || !status) return error(res, 'order_id and status are required', 400);
+    const allowed = ['processing', 'handover', 'picked_up', 'delivered'];
+    if (!allowed.includes(status)) return error(res, 'Invalid status', 400);
+
+    const order = await Order.findOneAndUpdate(
+      { _id: order_id, deliverymanId: req.user.id },
+      { orderStatus: status, ...(status === 'delivered' ? { deliveredAt: new Date() } : {}) },
+      { new: true },
+    );
+    if (!order) return error(res, 'Order not found', 404);
+
+    if (status === 'delivered') {
+      await DeliveryMan.findByIdAndUpdate(req.user.id, {
+        $inc: { currentOrders: -1, orderCount: 1 },
+      });
+    }
+    return success(res, order);
+  } catch (err) { next(err); }
+};
+
+// GET /deliveryman/notifications
+exports.getNotifications = async (req, res, next) => {
+  try {
+    const { skip, page, limit } = paginate(req.query);
+    const [notifications, total] = await Promise.all([
+      Notification.find({ userId: req.user.id, userType: 'deliveryman' }).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
+      Notification.countDocuments({ userId: req.user.id, userType: 'deliveryman' }),
+    ]);
+    return paginated(res, notifications, total, page, limit);
+  } catch (err) { next(err); }
+};
+
+// POST /deliveryman/record-location  body: { latitude, longitude }
+exports.recordLocation = async (req, res, next) => {
+  try {
+    const { latitude, longitude } = req.body;
+    if (!latitude || !longitude) return error(res, 'latitude and longitude are required', 400);
+    await DeliveryMan.findByIdAndUpdate(req.user.id, {
+      lastLatitude: latitude,
+      lastLongitude: longitude,
+      lastLocationAt: new Date(),
+    });
+    return success(res, null, 'Location updated');
+  } catch (err) { next(err); }
+};

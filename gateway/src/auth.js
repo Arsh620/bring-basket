@@ -3,13 +3,22 @@ const jwt = require('jsonwebtoken');
 // Public routes — JWT verify nahi hoga
 const PUBLIC_ROUTES = [
   { method: 'POST', path: /^\/api\/v1\/(admin|customer|vendor|supplier|warehouse|deliveryman)\/auth\/login$/ },
-  { method: 'POST', path: /^\/api\/v1\/(admin|customer)\/auth\/register$/ },
+  { method: 'POST', path: /^\/api\/v1\/(admin|customer|vendor)\/auth\/register$/ },
+  { method: 'POST', path: /^\/api\/v1\/customer\/auth\/forgot-password$/ },
+  { method: 'POST', path: /^\/api\/v1\/customer\/auth\/verify-otp$/ },
+  { method: 'PUT',  path: /^\/api\/v1\/customer\/auth\/reset-password$/ },
+  { method: 'POST', path: /^\/api\/v1\/payment\/razorpay\/webhook$/ },
+  { method: 'GET',  path: /^\/api\/v1\/customer\/(?:items|categories|stores|banners|flash-sales|campaigns|advertisements|cashback|coupons|config|zones)(?:\/[^/]+)*$/ },
+  { method: 'POST', path: /^\/api\/v1\/customer\/zones\/check$/ },
+  { method: 'GET',  path: /^\/api\/v1\/customer\/(terms-and-conditions|about-us|privacy-policy|refund-policy|shipping-policy|cancellation)$/ },
+  { method: '*',    path: /^\/api\/v1\/customer\/cart(?:\/|$)/ },
+  { method: '*',    path: /^\/api\/v1\/customer\/order(?:\/|$)/ },
   { method: 'GET',  path: /^\/health$/ },
 ];
 
 const isPublic = (req) =>
   PUBLIC_ROUTES.some(
-    (r) => r.method === req.method && r.path.test(req.path),
+    (r) => (r.method === req.method || r.method === '*') && r.path.test(req.path),
   );
 
 module.exports = (req, res, next) => {

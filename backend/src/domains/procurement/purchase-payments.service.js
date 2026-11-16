@@ -76,21 +76,45 @@ const sumAmount = async (Model, filter, field, session) => {
   return Number(result?.total || 0);
 };
 
-const refreshBillPaymentStatus = async (bill, session) => {
-  if (['draft', 'void'].includes(bill.status)) return bill;
-
-  const amountPaid = await sumAmount(
+const sumBillPayments = async (bill, session) => {
+  const modernPayments = await sumAmount(
     PurchasePayment,
     { purchaseBillId: bill._id },
     'amount',
     session,
   );
-  const completedReturns = await sumAmount(
+  if (bill.legacyId === undefined || !mongoose.connection.db) return modernPayments;
+  const legacyOptions = session ? { session } : {};
+  const legacyPayments = await mongoose.connection.db.collection('purchasepayments')
+    .find({ purchaseBillId: bill.legacyId }, legacyOptions)
+    .toArray();
+  const legacyTotal = legacyPayments.reduce((sum, record) => sum + Number(record.amount || 0), 0);
+  return Number((modernPayments + legacyTotal).toFixed(2));
+};
+
+const sumCompletedReturns = async (bill, session) => {
+  const modernReturns = await sumAmount(
     PurchaseReturn,
     { purchaseBillId: bill._id, status: 'completed' },
     'totalAmount',
     session,
   );
+  if (bill.legacyId === undefined || !mongoose.connection.db) return modernReturns;
+  const legacyOptions = session ? { session } : {};
+  const legacyReturns = await mongoose.connection.db.collection('purchasereturns')
+    .find({ purchaseBillId: bill.legacyId, status: 'completed' }, legacyOptions)
+    .toArray();
+  const legacyTotal = legacyReturns.reduce((sum, record) => (
+    sum + Number(record.totalAmount ?? record.total_amount ?? 0)
+  ), 0);
+  return Number((modernReturns + legacyTotal).toFixed(2));
+};
+
+const refreshBillPaymentStatus = async (bill, session) => {
+  if (['draft', 'void'].includes(bill.status)) return bill;
+
+  const amountPaid = await sumBillPayments(bill, session);
+  const completedReturns = await sumCompletedReturns(bill, session);
   Object.assign(
     bill,
     calculateSettlement(
@@ -163,18 +187,8 @@ const record = async (body) => {
       if (!vendor) throw new AppError('Purchase vendor not found', 404);
 
       if (bill) {
-        const paid = await sumAmount(
-          PurchasePayment,
-          { purchaseBillId: bill._id },
-          'amount',
-          session,
-        );
-        const returned = await sumAmount(
-          PurchaseReturn,
-          { purchaseBillId: bill._id, status: 'completed' },
-          'totalAmount',
-          session,
-        );
+        const paid = await sumBillPayments(bill, session);
+        const returned = await sumCompletedReturns(bill, session);
         const balanceDue = Math.max(
           0,
           Number((Number(bill.total || 0) - paid - returned).toFixed(2)),
@@ -221,4 +235,6 @@ module.exports = {
   normalizePayment,
   refreshBillPaymentStatus,
   calculateSettlement,
+  sumBillPayments,
+  sumCompletedReturns,
 };

@@ -35,3 +35,20 @@ exports.logout = async (req, res, next) => {
     return success(res, null, 'Logged out');
   } catch (err) { next(err); }
 };
+
+exports.register = async (req, res, next) => {
+  try {
+    const { fName, lName, phone, email, password } = req.body;
+    if (!fName || !phone || !email || !password) return error(res, 'fName, phone, email, password required', 400);
+    if (password.length < 6) return error(res, 'Password must be at least 6 characters', 400);
+
+    const exists = await Vendor.findOne({ $or: [{ email: email.toLowerCase() }, { phone }] });
+    if (exists) return error(res, 'Email or phone already registered', 409);
+
+    const vendor = await Vendor.create({ fName, lName, phone, email, password, status: false }); // pending approval
+    const token = generateToken(vendor._id, 'vendor');
+    const data = vendor.toObject();
+    delete data.password;
+    return success(res, { token, vendor: data }, 'Registration successful. Awaiting admin approval.', 201);
+  } catch (err) { next(err); }
+};

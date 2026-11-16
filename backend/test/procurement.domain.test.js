@@ -4,6 +4,8 @@ const procurementRoutes = require('../src/routes/v1/procurement');
 const purchaseVendorsService = require('../src/domains/procurement/purchase-vendors.service');
 const purchaseBillsService = require('../src/domains/procurement/purchase-bills.service');
 const purchasePaymentsService = require('../src/domains/procurement/purchase-payments.service');
+const purchaseReturnsService = require('../src/domains/procurement/purchase-returns.service');
+const PurchaseReturn = require('../src/models/purchase/PurchaseReturn');
 const PurchaseOrder = require('../src/models/purchase/PurchaseOrder');
 const WarehouseItemBatch = require('../src/models/warehouse/WarehouseItemBatch');
 const { adminAuth } = require('../src/middleware/auth');
@@ -37,10 +39,41 @@ test('procurement endpoints are admin-authenticated under the purchases route gr
     ['GET', '/purchases/payments'],
     ['POST', '/purchases/payments'],
     ['DELETE', '/purchases/payments/:id'],
+    ['GET', '/purchases/returns'],
+    ['GET', '/purchases/returns/bills'],
+    ['GET', '/purchases/returns/bills/:id/items'],
+    ['GET', '/purchases/returns/bills/:id/template.csv'],
+    ['GET', '/purchases/returns/export.csv'],
+    ['POST', '/purchases/returns/import'],
+    ['POST', '/purchases/returns'],
+    ['GET', '/purchases/returns/:id'],
+    ['POST', '/purchases/returns/:id/approve'],
+    ['POST', '/purchases/returns/:id/void'],
   ]);
   for (const layer of procurementRoutes.stack.filter((entry) => entry.route)) {
     assert.equal(layer.route.stack[0].handle, adminAuth, `${layer.route.path} must require admin authentication`);
   }
+});
+
+test('purchase return APIs validate status, required vendor, and CSV input', async () => {
+  await assert.rejects(
+    purchaseReturnsService.getAll({ status: 'pending' }),
+    { message: 'status must be one of: draft, completed, void, cancelled' },
+  );
+  await assert.rejects(
+    purchaseReturnsService.create({ items: [] }),
+    { message: 'purchaseVendorId is required' },
+  );
+  await assert.rejects(
+    purchaseReturnsService.importCsv('507f1f77bcf86cd799439011', ''),
+    { message: 'CSV must include a header and at least one item' },
+  );
+  assert.deepEqual(
+    purchaseReturnsService.parseCsv('item_name,returned_qty\r\n"Soap, 100g",2\r\n"Bar ""A""",1'),
+    [['item_name', 'returned_qty'], ['Soap, 100g', '2'], ['Bar "A"', '1']],
+  );
+  assert.ok(PurchaseReturn.schema.path('status').enumValues.includes('void'));
+  assert.ok(PurchaseReturn.schema.path('reason').enumValues.includes('defective'));
 });
 
 test('purchase vendor create validates the required Laravel profile fields', async () => {

@@ -88,10 +88,13 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      STORE_SERVICE_URL: http://store:5003
     depends_on:
       mongo:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      store:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5001/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -217,6 +220,134 @@ services:
     networks:
       - bb_network
 
+  # ── Order service ──────────────────────────────────────────────────────────
+  order:
+    build:
+      context: .
+      dockerfile: order-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5006"
+    environment:
+      NODE_ENV: production
+      PORT: 5006
+      MONGO_URI: mongodb://mongo:27017/bring_basket_order?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      CATALOG_SERVICE_URL: http://catalog:5002
+      STORE_SERVICE_URL: http://store:5003
+      INVENTORY_SERVICE_URL: http://inventory:5004
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      catalog:
+        condition: service_healthy
+      store:
+        condition: service_healthy
+      inventory:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5006/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Accounting service ──────────────────────────────────────────────────────
+  accounting:
+    build:
+      context: .
+      dockerfile: accounting-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5007"
+    environment:
+      NODE_ENV: production
+      PORT: 5007
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5007/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Notification service ───────────────────────────────────────────────────
+  notification:
+    build:
+      context: .
+      dockerfile: notification-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5008"
+    environment:
+      NODE_ENV: production
+      PORT: 5008
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5008/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
+  # ── Payment service ────────────────────────────────────────────────────────
+  payment:
+    build:
+      context: .
+      dockerfile: payment-service/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "5010"
+    environment:
+      NODE_ENV: production
+      PORT: 5010
+      MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET}
+      JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+    depends_on:
+      mongo:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5010/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - bb_network
+
   # ── Gateway ────────────────────────────────────────────────────────────────
   gateway:
     build:
@@ -237,10 +368,12 @@ services:
       STORE_SERVICE_URL: http://store:5003
       INVENTORY_SERVICE_URL: http://inventory:5004
       PROCUREMENT_SERVICE_URL: http://procurement:5005
-      ORDER_SERVICE_URL: http://backend:5000
-      ACCOUNTING_SERVICE_URL: http://backend:5000
-      NOTIFICATION_SERVICE_URL: http://backend:5000
+      ORDER_SERVICE_URL: http://order:5006
+      ACCOUNTING_SERVICE_URL: http://accounting:5007
+      NOTIFICATION_SERVICE_URL: http://notification:5008
+      PAYMENT_SERVICE_URL: http://payment:5010
       SETTINGS_SERVICE_URL: http://backend:5000
+      BACKEND_URL: http://backend:5000
     depends_on:
       backend:
         condition: service_healthy
@@ -253,6 +386,14 @@ services:
       inventory:
         condition: service_healthy
       procurement:
+        condition: service_healthy
+      order:
+        condition: service_healthy
+      accounting:
+        condition: service_healthy
+      notification:
+        condition: service_healthy
+      payment:
         condition: service_healthy
       redis:
         condition: service_healthy

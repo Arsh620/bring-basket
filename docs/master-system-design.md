@@ -1,608 +1,764 @@
 # Bring Basket — Master System Design
-
-**Last updated:** 2026-11-05  
-**Current phase:** First five API-domain extractions  
-**Goal:** Production-grade, microservice-ready grocery delivery platform
+**Last updated:** 2025-07-10 (full audit)
 
 ---
 
-## Table of Contents
+## Architecture
 
-1. [System Overview](#1-system-overview)
-2. [Current Status](#2-current-status)
-3. [Infrastructure Status](#3-infrastructure-status)
-4. [Full Architecture — Target](#4-full-architecture--target)
-5. [Microservice Breakdown](#5-microservice-breakdown)
-6. [Database Design](#6-database-design)
-7. [API Routes — Complete Status](#7-api-routes--complete-status)
-8. [Microservice Extraction Roadmap](#8-microservice-extraction-roadmap)
-9. [Implementation Plan](#9-implementation-plan)
-10. [Environment Variables](#10-environment-variables)
-
----
-
-## 1. System Overview
+Single Express monolith (`backend/`) + Next.js frontend (`frontend/`).
+Microservice extraction deferred — build features first.
 
 ```
-                          INTERNET
-                              │
-                       [API Gateway]
-                         port 3000
-                    Route, Auth, Rate Limit
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-   [Identity]            [Catalog]             [Store]
-   internal 5001          internal 5002         internal 5003
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              │
-         ┌────────────────────┼────────────────────┐
-         │                    │                    │
-   [Inventory]          [Procurement]           [Order]
-   internal 5004          internal 5005         internal 5006
-         │                    │                    │
-         └────────────────────┼────────────────────┘
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-        [Accounting]   [Notification]     [Settings]
-        internal 5007    internal 5008     internal 5009
-                              │
-              ┌───────────────┼───────────────┐
-              │               │               │
-           [MongoDB]       [Redis]        [RabbitMQ]
-           Database     Cache + Sessions   Async Events
+Internet → API Gateway (port 3000) → Backend monolith (port 5000)
+                                   → Frontend Next.js (port 3001)
+MongoDB (27017) · Redis (6379)
 ```
-
-**Abhi ka state:** Identity, Catalog, Store, Inventory aur Procurement APIs
-dedicated containers mein chalti hain. Public `/api/v1/...` URLs Gateway ke through
-same rehte hain. Ye initial extractions hain: services abhi shared `bring_basket`
-MongoDB database aur backend domain source modules use karti hain; independent
-database ownership aur cross-service API/event integration abhi baaki hai.
 
 ---
 
-## 2. Current Status
+## Auth System — How Every Portal Logs In
 
-### Backend Features
+### JWT Strategy
+- Single `JWT_SECRET` shared across all portals
+- Token payload: `{ id, role }` — role determines which routes are accessible
+- Token expiry: 7 days (configurable via `JWT_EXPIRES_IN`)
+- No refresh tokens yet
 
-| Domain | Feature | Status |
+### Portal Login Summary
+
+| Portal | Login Route | Credential | JWT Role | Token Storage (FE) |
+|---|---|---|---|---|
+| Admin | `POST /api/v1/admin/auth/login` | email + password | `admin` | `localStorage.admin_token` |
+| Vendor | `POST /api/v1/vendor/auth/login` | email + password | `vendor` | `localStorage.vendor_token` (pending) |
+| Customer | `POST /api/v1/customer/auth/login` | email + password | `customer` | `localStorage.customer_token` |
+| Delivery Man | `POST /api/v1/deliveryman/auth/login` | phone + password | `deliveryman` | `localStorage.dm_token` |
+| Warehouse | `POST /api/v1/warehouse/auth/login` | username + password | `warehouse` | pending |
+| Supplier | `POST /api/v1/supplier/auth/login` | email + password | `supplier` | pending |
+| Vendor Employee | ❌ Not built yet | email + password | `vendor_employee` (planned) | pending |
+
+### Auth Middleware Chain
+```
+Request → auth.js (verify JWT + assert role) → controller
+```
+- `adminAuth` = verify + role === 'admin'
+- `vendorAuth` = verify + role === 'vendor'
+- `customerAuth` = verify + role === 'customer'
+- `deliverymanAuth` = verify + role === 'deliveryman'
+- `warehouseAuth` = verify + role === 'warehouse'
+- `supplierAuth` = verify + role === 'supplier'
+
+---
+
+## Complete Route Map (Backend)
+
+### Identity Routes (`/api/v1/...`)
+
+```
+POST   /admin/auth/login              ✅
+POST   /admin/auth/register           ✅
+GET    /admin/auth/me                 ✅
+POST   /admin/auth/logout             ✅
+GET    /admin/admins                  ✅
+POST   /admin/admins                  ✅
+GET    /admin/admins/:id              ✅
+PUT    /admin/admins/:id              ✅
+PATCH  /admin/admins/:id/status       ✅
+DELETE /admin/admins/:id              ✅
+GET    /admin/roles                   ✅
+POST   /admin/roles                   ✅
+GET    /admin/roles/:id               ✅
+PUT    /admin/roles/:id               ✅
+DELETE /admin/roles/:id               ✅
+
+POST   /customer/auth/login           ✅
+POST   /customer/auth/register        ✅
+GET    /customer/auth/me              ✅
+GET    /customer/addresses            ✅
+POST   /customer/addresses            ✅
+PUT    /customer/addresses/:id        ✅
+DELETE /customer/addresses            ✅
+
+POST   /vendor/auth/login             ✅
+GET    /vendor/auth/me                ✅
+POST   /vendor/auth/logout            ✅
+
+POST   /supplier/auth/login           ✅
+GET    /supplier/auth/me              ✅
+POST   /supplier/auth/logout          ✅
+
+POST   /deliveryman/auth/login        ✅
+GET    /deliveryman/auth/me           ✅
+POST   /deliveryman/auth/logout       ✅
+
+POST   /warehouse/auth/login          ✅
+GET    /warehouse/auth/me             ✅
+POST   /warehouse/auth/logout         ✅
+```
+
+### Customer Routes (`/api/v1/...`)
+
+```
+GET    /config                        ✅
+GET    /terms-and-conditions          ✅
+GET    /about-us                      ✅
+GET    /privacy-policy                ✅
+GET    /refund-policy                 ✅
+GET    /shipping-policy               ✅
+GET    /cancellation                  ✅
+GET    /zones                         ✅
+POST   /zones/check                   ✅
+
+GET    /items                         ✅
+GET    /items/latest                  ✅
+GET    /items/popular                 ✅
+GET    /items/discounted              ✅
+GET    /items/recommended             ✅
+GET    /items/most-reviewed           ✅
+GET    /items/search                  ✅
+GET    /items/search-suggestion       ✅
+GET    /items/:id                     ✅
+GET    /items/:id/reviews             ✅
+POST   /items/reviews/submit          ✅ (auth)
+
+GET    /categories                    ✅
+GET    /categories/popular            ✅
+GET    /categories/:id/children       ✅
+GET    /categories/:id/items          ✅
+
+GET    /stores                        ✅
+GET    /stores/latest                 ✅
+GET    /stores/popular                ✅
+GET    /stores/search                 ✅
+GET    /stores/:id                    ✅
+
+GET    /banners                       ✅
+GET    /banners/store/:storeId        ✅
+GET    /flash-sales                   ✅
+GET    /flash-sales/items             ✅
+GET    /campaigns/basic               ✅
+GET    /campaigns/item                ✅
+GET    /advertisements                ✅
+
+GET    /coupons                       ✅
+GET    /coupons/apply                 ✅ (auth)
+
+GET    /customer/info                 ✅ (auth)
+POST   /customer/update-profile       ✅ (auth)
+PUT    /customer/cm-firebase-token    ✅ (auth)
+DELETE /customer/remove-account       ✅ (auth)
+
+GET    /customer/wish-list            ✅ (auth)
+POST   /customer/wish-list/add        ✅ (auth)
+DELETE /customer/wish-list/remove     ✅ (auth)
+
+GET    /customer/wallet/balance       ✅ (auth)
+GET    /customer/wallet/transactions  ✅ (auth)
+
+GET    /customer/notifications        ✅ (auth)
+PUT    /customer/notifications/read-all ✅ (auth)
+PUT    /customer/notifications/:id/read ✅ (auth)
+```
+
+### Cart & Order Routes (`/api/v1/customer/...`)
+
+```
+POST   /cart/merge-guest              ✅
+GET    /cart/list                     ✅
+POST   /cart/add                      ✅
+POST   /cart/update                   ✅
+DELETE /cart/remove-item              ✅
+DELETE /cart/remove                   ✅
+
+GET    /order/list                    ✅
+GET    /order/running-orders          ✅
+GET    /order/details                 ✅
+POST   /order/place                   ✅
+PUT    /order/cancel                  ✅
+```
+
+### Delivery Man Routes (`/api/v1/deliveryman/...`)
+
+```
+GET    /profile                       ✅
+PUT    /update-profile                ✅
+POST   /update-active-status          ✅
+PUT    /update-fcm-token              ✅
+GET    /current-orders                ✅
+GET    /all-orders                    ✅
+GET    /order-delivery-history        ✅
+GET    /order                         ✅
+PUT    /accept-order                  ✅
+PUT    /update-order-status           ✅
+GET    /notifications                 ✅
+POST   /record-location               ✅
+```
+
+### Vendor Routes (`/api/v1/vendor/...`)
+
+```
+GET    /profile                       ✅
+PUT    /update-profile                ✅
+GET    /dashboard                     ✅
+GET    /orders                        ✅
+PUT    /orders/update-status          ✅
+GET    /items                         ✅
+POST   /items                         ✅
+PUT    /items/:id                     ✅
+PATCH  /items/:id/status              ✅
+DELETE /items/:id                     ✅
+GET    /stores                        ✅
+PUT    /update-fcm-token              ✅
+```
+
+### Admin Routes (`/api/v1/admin/...`)
+
+```
+--- Catalog ---
+GET/POST       /brands                ✅
+PUT/PATCH/DEL  /brands/:id            ✅
+GET/POST       /categories            ✅
+GET/PUT/PATCH/DEL /categories/:id     ✅
+GET/POST       /items                 ✅
+GET/PUT/PATCH/DEL /items/:id          ✅
+GET            /items/low-stock       ✅
+PATCH          /items/:id/stock       ✅
+GET/POST       /units                 ✅
+GET/PUT/DEL    /units/:id             ✅
+GET/POST       /unit-groups           ✅
+GET/PUT/PATCH/DEL /unit-groups/:id    ✅
+GET/POST/PUT/DEL /unit-groups/:id/conversions ✅
+GET/POST       /item-batches          ✅
+GET/PUT/DEL    /item-batches/:id      ✅
+GET            /item-batches/expiring-soon ✅
+
+--- Stores ---
+GET/POST       /modules               ✅
+GET/PUT/PATCH/DEL /modules/:id        ✅
+GET/POST       /zones                 ✅
+GET/PUT/PATCH/DEL /zones/:id          ✅
+GET/POST       /stores                ✅
+GET/PUT/PATCH/DEL /stores/:id         ✅
+GET/PUT        /stores/:id/schedule   ✅
+
+--- Inventory ---
+GET/POST       /warehouses            ✅
+GET/PUT/PATCH/DEL /warehouses/:id     ✅
+GET/PUT/PATCH  /warehouses/:id/stock  ✅
+GET            /stock-movements       ✅
+GET/POST       /stock-transfers       ✅
+GET/PATCH      /stock-transfers/:id   ✅
+GET/POST       /store-stock-requests  ✅
+GET/PATCH      /store-stock-requests/:id ✅
+GET/POST       /batch-write-offs      ✅
+
+--- Procurement ---
+GET/POST       /purchases/vendors     ✅
+GET/PUT/PATCH/DEL /purchases/vendors/:id ✅
+GET/POST       /purchases/orders      ✅
+GET/PUT        /purchases/orders/:id  ✅
+POST           /purchases/orders/:id/issue ✅
+POST           /purchases/orders/:id/cancel ✅
+POST           /purchases/orders/:id/convert-to-bill ✅
+GET/PUT        /purchases/bills       ✅
+GET            /purchases/bills/:id   ✅
+POST           /purchases/bills/:id/void ✅
+GET            /purchases/bills/:id/grn-invoice ✅
+POST           /purchases/bills/:id/mark-stock-received ✅
+GET/POST       /purchases/payments    ✅
+DELETE         /purchases/payments/:id ✅
+GET/POST       /purchases/returns     ✅
+GET            /purchases/returns/:id ✅
+POST           /purchases/returns/:id/approve ✅
+POST           /purchases/returns/:id/void ✅
+
+--- Orders ---
+GET            /orders                ✅
+GET            /orders/:id            ✅
+
+--- Marketing ---
+GET/POST       /banners               ✅
+PUT/PATCH/DEL  /banners/:id           ✅
+GET/POST       /coupons               ✅
+PUT/PATCH/DEL  /coupons/:id           ✅
+GET/POST       /flash-sales           ✅
+GET/PUT/PATCH/DEL /flash-sales/:id    ✅
+GET/POST       /campaigns             ✅
+PUT/PATCH/DEL  /campaigns/:id         ✅
+GET/POST       /advertisements        ✅
+PUT/PATCH/DEL  /advertisements/:id    ✅
+
+--- Settings ---
+GET            /settings              ✅
+POST           /settings              ✅
+POST           /settings/bulk         ✅
+
+--- Notifications ---
+POST           /notifications/broadcast ✅
+```
+
+---
+
+## Frontend Pages — Current Status
+
+### Admin Panel (`/admin/...`)
+
+| Page | Status | Notes |
 |---|---|---|
-| Identity | Admin auth (login, register, me, logout) | ✅ Done |
-| Identity | Admin CRUD + status toggle | ✅ Done |
-| Identity | Admin Roles CRUD | ✅ Done |
-| Identity | Customer auth (login, register, me) | ✅ Done |
-| Identity | Vendor auth (login, me, logout) | ✅ Done |
-| Identity | Supplier auth (login, me, logout) | ✅ Done |
-| Identity | Warehouse portal auth (login, me, logout) | ✅ Done |
-| Identity | DeliveryMan auth (login, me, logout) | ✅ Done |
-| Identity | Vendor Employee auth + CRUD | ❌ Pending |
-| Identity | DeliveryMan CRUD | ❌ Pending |
-| Catalog | Categories CRUD + status + filters | ✅ Done |
-| Catalog | Brands CRUD + status | ✅ Done |
-| Catalog | Units CRUD | ✅ Done |
-| Catalog | Unit Groups + Conversions CRUD | ✅ Done |
-| Catalog | Items CRUD + status + stock + low-stock | ✅ Done |
-| Catalog | Item Batches CRUD + expiring-soon | ✅ Done |
-| Store | Modules CRUD + status + filters | ✅ Done |
-| Store | Zones CRUD + status + filters | ✅ Done |
-| Store | Stores CRUD + status + schedule + filters | ✅ Done |
-| Inventory | Warehouses CRUD + status + filters | ✅ Done |
-| Inventory | Warehouse Stock (get, set, adjust) | ✅ Done |
-| Inventory | Stock Movements (list) | ✅ Done |
-| Inventory | Stock Transfers (full workflow) | ✅ Done |
-| Inventory | Store Stock Requests (full workflow) | ✅ Done |
-| Inventory | Batch Write-offs | ✅ Done |
-| Procurement | Purchase Vendors CRUD + status + approval | ✅ Done |
-| Procurement | Purchase Orders CRUD + issue + cancel | ✅ Done |
-| Procurement | Purchase Bills (convert, edit, void, GRN) | ✅ Done |
-| Procurement | Purchase Payments (list, record, delete) | ✅ Done |
-| Procurement | Purchase Returns | ❌ Pending |
-| Order | Orders (customer order lifecycle) | ❌ Pending |
-| Order | Cart + Coupons | ❌ Pending |
-| Order | Reviews + Refunds | ❌ Pending |
-| Accounting | Wallet + Ledger + Disbursements | ❌ Pending |
-| Notification | Push + Email + SMS | ❌ Pending |
-| Settings | Business Settings | ❌ Pending |
+| `/admin/login` | ✅ Done | Polished UI, zod validation |
+| `/admin/dashboard` | ✅ Done | Stats, low-stock, quick links |
+| `/admin/catalog/items` | ✅ Done | ResourcePage component |
+| `/admin/catalog/categories` | ✅ Done | |
+| `/admin/catalog/brands` | ✅ Done | |
+| `/admin/catalog/units` | ✅ Done | |
+| `/admin/catalog/unit-groups` | ✅ Done | |
+| `/admin/catalog/item-batches` | ✅ Done | |
+| `/admin/stores` | ✅ Done | |
+| `/admin/modules` | ✅ Done | |
+| `/admin/zones` | ✅ Done | |
+| `/admin/warehouse` | ✅ Done | |
+| `/admin/inventory/warehouse-stock` | ✅ Done | |
+| `/admin/inventory/stock-transfers` | ✅ Done | |
+| `/admin/inventory/store-stock-requests` | ✅ Done | |
+| `/admin/inventory/stock-movements` | ✅ Done | |
+| `/admin/inventory/batch-write-offs` | ✅ Done | |
+| `/admin/procurement/vendors` | ✅ Done | |
+| `/admin/procurement/orders` | ✅ Done | |
+| `/admin/procurement/bills` | ✅ Done | GRN, invoice upload |
+| `/admin/procurement/payments` | ✅ Done | |
+| `/admin/procurement/returns` | ✅ Done | |
+| `/admin/orders` | ✅ Done | All statuses via filter route |
+| `/admin/banners` | ✅ Done | |
+| `/admin/flash-sales` | ✅ Done | |
+| `/admin/campaigns` | ✅ Done | |
+| `/admin/advertisements` | ✅ Done | |
+| `/admin/coupons` | ✅ Done | |
+| `/admin/admins` | ✅ Done | |
+| `/admin/roles` | ✅ Done | |
+| `/admin/settings` | ✅ Done | App info + legal pages |
+| `/admin/customers` | ✅ Done | List + status toggle |
+| `/admin/vendors` | ✅ Done | List + status toggle |
+| `/admin/delivery-men` | ✅ Done | List + create + status |
+| `/admin/cashback` | ✅ Done | CRUD cashback rules |
+| `/admin/wallet-bonus` | ✅ Done | CRUD wallet bonus |
+| `/admin/employees` | ❌ Missing | |
+| `/admin/loyalty-points` | ❌ Missing | |
+| `/admin/disbursements` | ❌ Missing | |
+| `/admin/subscription-packages` | ❌ Missing | |
+| `/admin/reports/*` | ❌ Missing | |
+| `/admin/activity-logs` | ❌ Missing | |
 
-### Frontend Pages
+### Customer Portal (`/...`)
 
-| Page | Backend | Frontend |
+| Page | Status | Notes |
 |---|---|---|
-| Admin Login | ✅ | ✅ |
-| Dashboard | ❌ | ❌ |
-| Procurement — Vendors | ✅ | ✅ |
-| Procurement — Orders | ✅ | ✅ |
-| Procurement — Bills | ✅ | ✅ |
-| Procurement — Payments | ✅ | ✅ |
-| Catalog — Items | ✅ | ✅ |
-| Catalog — Categories | ✅ | ✅ |
-| Catalog — Brands | ✅ | ✅ |
-| Catalog — Units | ✅ | ✅ |
-| Catalog — Unit Groups | ✅ | ✅ |
-| Catalog — Item Batches | ✅ | ✅ |
-| Stores | ✅ | ❌ Pending |
-| Zones | ✅ | ❌ Pending |
-| Modules | ✅ | ❌ Pending |
-| Warehouses | ✅ | ❌ Pending |
-| Warehouse Stock | ✅ | ❌ Pending |
-| Stock Movements | ✅ | ❌ Pending |
-| Stock Transfers | ✅ | ❌ Pending |
-| Store Stock Requests | ✅ | ❌ Pending |
-| Batch Write-offs | ✅ | ❌ Pending |
-| Admins Management | ✅ | ✅ |
-| Roles Management | ✅ | ✅ |
+| `/home` | ✅ Done | Banners, categories, stores, items, search |
+| `/shop` | ✅ Done | Store select, items, cart, checkout, orders |
+| `/login` | ✅ Done | OTP forgot password flow |
+| `/register` | ✅ Done | |
+| `/profile` | ✅ Done | Edit + stats + quick links |
+| `/wishlist` | ✅ Done | List + remove + add-to-cart |
+| `/wallet` | ✅ Done | Balance + txns + add fund |
+| `/orders` | ✅ Done | List + cancel + details |
+| `/loyalty` | ✅ Done | History + convert to wallet |
+| `/notifications` | ✅ Done | Mark read/all |
+| `/addresses` | ❌ Missing | |
 
----
+### Delivery Man Portal (`/deliveryman/...`)
 
-## 3. Infrastructure Status
-
-| Requirement | Status | Detail |
+| Page | Status | Notes |
 |---|---|---|
-| Security — Helmet | ✅ Done | HTTP security headers |
-| Security — Rate Limiting | ✅ Done | 100 req/15min global, 10 req/15min auth |
-| Security — Input Sanitize | ✅ Done | `$` operator strip |
-| Security — CORS | ✅ Done | `ALLOWED_ORIGINS` env se |
-| Security — JWT + bcrypt | ✅ Done | Role-specific middleware |
-| Security — Role Check | ✅ Done | `checkRole` on all admin routes |
-| Performance — Compression | ✅ Done | gzip responses |
-| Performance — Indexes | ✅ Done | MongoDB indexes on all models |
-| Performance — Parallel Queries | ✅ Done | `Promise.all` throughout |
-| Performance — Redis Cache | ❌ Pending | Categories, brands cache |
-| Data Safety — Transactions | ✅ Done | Procurement + Inventory |
-| Data Safety — Retry Writes | ✅ Done | `retryWrites: true` |
-| Reliability — Health Check | ✅ Done | `/health` endpoint |
-| Reliability — Graceful Shutdown | ✅ Done | SIGTERM handler |
-| Reliability — Error Handling | ✅ Done | Global error handler + unhandledRejection |
-| Logging — Morgan | ✅ Done | HTTP request logs |
-| Logging — Winston | ✅ Done | `logs/error.log` + `logs/combined.log` |
-| Scaling — PM2 Cluster | ✅ Done | `ecosystem.config.js`, `instances: max` |
-| Scaling — Redis Rate Limiter | ✅ Done | Gateway + Identity use shared Redis-backed limits |
-| Scaling — Docker | ✅ Done | MongoDB replica set, Redis, backend, five domain services, Gateway, frontend |
-| Scaling — API Gateway | ✅ Done | JWT, CORS, rate limits; five extracted domains have dedicated upstreams |
-| Identity extraction | ✅ Initial | Dedicated container; still shares MongoDB and backend source modules |
-| Catalog extraction | ✅ Initial | Dedicated container; still shares MongoDB and inventory stock model |
-| Store extraction | ✅ Initial | Dedicated container; still shares MongoDB and backend source modules |
-| Inventory extraction | ✅ Initial | Dedicated container; still shares MongoDB and Catalog/Store model code |
-| Procurement extraction | ✅ Initial | Dedicated container; still shares MongoDB and Inventory/Catalog/Store models |
-| Service health/readiness | ✅ Done | Compose waits for MongoDB replica set, Redis, and service health |
+| `/deliveryman/login` | ✅ Done | Phone + password |
+| `/deliveryman` | ✅ Done | Dashboard, orders, status update |
+| `/deliveryman/wallet` | ❌ Missing | |
+| `/deliveryman/profile` | ❌ Missing | |
 
----
+### Vendor Portal (`/vendor/...`)
 
-## 4. Full Architecture — Target
-
-### Request Flow
-
-```
-Client (Browser / Mobile App)
-        │
-        ▼
-[API Gateway — port 3000]
-  - JWT verify karo
-  - Rate limit karo (Redis-backed)
-  - Route karo sahi service pe
-  - Response compress karo
-        │
-        ├──► [Identity Service — internal 5001]
-        │         POST /auth/admin/login
-        │         POST /auth/customer/login
-        │         GET  /auth/me
-        │
-        ├──► [Catalog Service — internal 5002]
-        │         GET  /items
-        │         GET  /categories
-        │
-        ├──► [Store Service — internal 5003]
-        │         GET  /stores
-        │         GET  /zones
-        │
-        ├──► [Inventory Service — internal 5004]
-        │         GET  /warehouses/:id/stock
-        │         POST /stock-transfers
-        │
-        ├──► [Procurement Service — internal 5005]
-        │         POST /purchases/orders
-        │         POST /purchases/bills/:id/mark-stock-received
-        │
-        ├──► [Order Service — 3006]
-        │         POST /orders
-        │         GET  /orders/:id
-        │
-        ├──► [Accounting Service — 3007]
-        │         GET  /wallet/balance
-        │         POST /disbursements
-        │
-        ├──► [Notification Service — 3008]
-        │         POST /notifications/send
-        │
-        └──► [Settings Service — 3009]
-                  GET  /settings/business
-```
-
-### Async Event Flow (RabbitMQ / Bull + Redis)
-
-```
-Order placed
-    │
-    ├──► Inventory Service  (stock deduct karo)
-    ├──► Accounting Service (wallet debit karo)
-    └──► Notification Service (customer ko notify karo)
-
-Payment received
-    │
-    ├──► Accounting Service (ledger update karo)
-    └──► Notification Service (receipt bhejo)
-
-GRN received
-    │
-    └──► Inventory Service (warehouse stock update karo)
-```
-
----
-
-## 5. Microservice Breakdown
-
-### Identity Service (Docker internal port 5001)
-**Owns:** Admin, AdminRole, User, Vendor, VendorEmployee, DeliveryMan  
-**DB:** Currently shares `bring_basket`; separate `bring_basket_identity` is a later migration  
-**Responsibilities:**
-- Token issue karna (JWT)
-- Password hash + verify
-- Role management
-
-**Cross-service:** Baaki services sirf JWT verify karte hain — Identity se direct call nahi
-**Current implementation:** Dedicated container; routes/controllers/models are still sourced from `backend/src`.
-
----
-
-### Catalog Service (Docker internal port 5002)
-**Owns:** Item, Category, Brand, Unit, UnitGroup, UnitGroupConversion, ItemBatch  
-**DB:** Currently shares `bring_basket`; separate `bring_basket_catalog` is a later migration  
-**Responsibilities:**
-- Item master data
-- Category tree
-- Unit conversions
-
-**Cross-service:** Inventory stock ke liye `itemId` pass karta hai — direct model import nahi
-**Current implementation:** Catalog routes run in a dedicated container. Item stock operations still use the shared inventory stock model and database.
-
----
-
-### Store Service (Docker internal port 5003)
-**Owns:** Module, Store, Zone  
-**DB:** `bring_basket_store`  
-**Responsibilities:**
-- Store master data
-- Zone + delivery area
-- Store schedule
-
-**Current implementation:** Dedicated container. Store reads abhi shared MongoDB mein
-Identity ke `Vendor` model ko populate karte hain; independent ownership baad mein.
-
----
-
-### Inventory Service (Docker internal port 5004)
-**Owns:** Warehouse, WarehouseItemStock, WarehouseStockMovement, WarehouseStockTransfer, StoreStockRequest, WarehouseItemBatch  
-**DB:** `bring_basket_inventory`  
-**Responsibilities:**
-- Warehouse stock balance
-- Stock movements audit
-- Transfer workflows
-- Store replenishment
-
-**Current implementation:** Dedicated container. Inventory abhi Catalog item/stock
-helpers aur Store models directly share karta hai; API/event boundary abhi baaki hai.
-
----
-
-### Procurement Service (Docker internal port 5005)
-**Owns:** PurchaseVendor, PurchaseOrder, PurchaseBill, PurchasePayment, PurchaseReturn  
-**DB:** `bring_basket_procurement`  
-**Responsibilities:**
-- Vendor management
-- Purchase order lifecycle
-- GRN + stock receipt
-- Payment settlement
-
-**Current implementation:** Dedicated container. GRN/stock updates abhi shared MongoDB
-models aur MongoDB transactions se hote hain; cross-service event integration baad mein.
-
----
-
-### Order Service (planned Docker internal port 5006)
-**Owns:** Order, OrderDetail, Cart, Coupon, Review, Refund  
-**DB:** `bring_basket_order`  
-**Responsibilities:**
-- Customer order lifecycle
-- Cart management
-- Coupon apply
-- Refund processing
-
-**Cross-service:**
-- Catalog se item details
-- Inventory se stock check
-- Accounting se wallet debit
-- Notification se order updates
-
----
-
-### Accounting Service (planned Docker internal port 5007)
-**Owns:** AccountLedger, JournalEntry, Expense, WalletTransaction, Disbursement  
-**DB:** `bring_basket_accounting`  
-**Responsibilities:**
-- Wallet balance
-- Vendor disbursements
-- Expense tracking
-
----
-
-### Notification Service (planned Docker internal port 5008)
-**Owns:** Notification, UserNotification, NotificationSetting  
-**DB:** `bring_basket_notification`  
-**Responsibilities:**
-- Push notifications (Firebase)
-- Email (SMTP)
-- SMS
-
----
-
-### Settings Service (planned Docker internal port 5009)
-**Owns:** BusinessSetting, EmailTemplate, Translation  
-**DB:** `bring_basket_settings`  
-**Responsibilities:**
-- Business configuration
-- Email templates
-- Multi-language
-
----
-
-## 6. Database Design
-
-### Shared Infrastructure
-```
-MongoDB replica set (transactions ke liye zaroori; local Compose ek-node replica set chalata hai)
-Redis (Cache + Rate Limiting + Bull Queue)
-RabbitMQ / Bull (Async events)
-```
-
-### Per-Service DB (Microservice phase mein)
-```
-bring_basket_identity
-bring_basket_catalog
-bring_basket_store
-bring_basket_inventory
-bring_basket_procurement
-bring_basket_order
-bring_basket_accounting
-bring_basket_notification
-bring_basket_settings
-```
-
-### Abhi (Initial service extractions)
-```
-bring_basket  ← extracted services abhi isi shared database ko use karti hain
-```
-
-### Cross-service References Rule
-- Services apne domain ke bahar ke documents `populate` nahi karenge
-- Sirf `id` store karo, details chahiye toh us service ka HTTP endpoint call karo
-- Async events ke liye Bull queue use karo
-
----
-
-## 7. API Routes — Complete Status
-
-### Identity
-| Method | Path | Status |
+| Page | Status | Notes |
 |---|---|---|
-| POST | `/api/v1/admin/auth/login` | ✅ |
-| POST | `/api/v1/admin/auth/register` | ✅ |
-| GET | `/api/v1/admin/auth/me` | ✅ |
-| POST | `/api/v1/admin/auth/logout` | ✅ |
-| GET/POST | `/api/v1/admin/admins` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/admins/:id` | ✅ |
-| GET/POST | `/api/v1/admin/roles` | ✅ |
-| GET/PUT/DELETE | `/api/v1/admin/roles/:id` | ✅ |
-| POST | `/api/v1/customer/auth/login` | ✅ |
-| POST | `/api/v1/customer/auth/register` | ✅ |
-| GET | `/api/v1/customer/auth/me` | ✅ |
-| POST | `/api/v1/vendor/auth/login` | ✅ |
-| GET | `/api/v1/vendor/auth/me` | ✅ |
-| POST | `/api/v1/supplier/auth/login` | ✅ |
-| GET | `/api/v1/supplier/auth/me` | ✅ |
-| POST | `/api/v1/warehouse/auth/login` | ✅ |
-| GET | `/api/v1/warehouse/auth/me` | ✅ |
-| POST | `/api/v1/deliveryman/auth/login` | ✅ |
-| GET | `/api/v1/deliveryman/auth/me` | ✅ |
+| `/vendor/login` | ✅ Done | |
+| `/vendor/register` | ✅ Done | |
+| `/vendor/dashboard` | ✅ Done | Stats + quick actions |
+| `/vendor/items` | ✅ Done | Full CRUD + status + search |
+| `/vendor/orders` | ✅ Done | List + filter + status update |
+| `/vendor/stores` | ✅ Done | View assigned stores |
+| `/vendor/pos` | ❌ Missing | Backend not built |
+| `/vendor/reports` | ❌ Missing | Backend not built |
+| `/vendor/employees` | ❌ Missing | Backend not built |
+| `/vendor/withdrawal` | ❌ Missing | Backend not built |
 
-### Catalog
-| Method | Path | Status |
-|---|---|---|
-| GET/POST | `/api/v1/admin/categories` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/categories/:id` | ✅ |
-| GET/POST | `/api/v1/admin/brands` | ✅ |
-| PUT/PATCH/DELETE | `/api/v1/admin/brands/:id` | ✅ |
-| GET/POST | `/api/v1/admin/units` | ✅ |
-| GET/PUT/DELETE | `/api/v1/admin/units/:id` | ✅ |
-| GET/POST | `/api/v1/admin/unit-groups` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/unit-groups/:id` | ✅ |
-| GET/POST | `/api/v1/admin/unit-groups/:id/conversions` | ✅ |
-| PUT/DELETE | `/api/v1/admin/unit-groups/:id/conversions/:cid` | ✅ |
-| GET/POST | `/api/v1/admin/items` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/items/:id` | ✅ |
-| GET | `/api/v1/admin/items/low-stock` | ✅ |
-| GET/POST | `/api/v1/admin/item-batches` | ✅ |
-| GET/PUT/DELETE | `/api/v1/admin/item-batches/:id` | ✅ |
-| GET | `/api/v1/admin/item-batches/expiring-soon` | ✅ |
+### Warehouse Portal (`/warehouse/...`)
 
-### Store
-| Method | Path | Status |
+| Page | Status | Notes |
 |---|---|---|
-| GET/POST | `/api/v1/admin/modules` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/modules/:id` | ✅ |
-| GET/POST | `/api/v1/admin/zones` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/zones/:id` | ✅ |
-| GET/POST | `/api/v1/admin/stores` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/stores/:id` | ✅ |
-| GET/PUT | `/api/v1/admin/stores/:id/schedule` | ✅ |
+| `/warehouse/login` | ❌ Missing | Backend ready |
+| `/warehouse/dashboard` | ❌ Missing | |
+| `/warehouse/stock` | ❌ Missing | |
+| `/warehouse/requests` | ❌ Missing | |
 
-### Inventory
-| Method | Path | Status |
-|---|---|---|
-| GET/POST | `/api/v1/admin/warehouses` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/warehouses/:id` | ✅ |
-| GET | `/api/v1/admin/warehouses/:id/stock` | ✅ |
-| PUT | `/api/v1/admin/warehouses/:id/stock/:itemId` | ✅ |
-| PATCH | `/api/v1/admin/warehouses/:id/stock/:itemId/adjust` | ✅ |
-| GET | `/api/v1/admin/stock-movements` | ✅ |
-| GET/POST | `/api/v1/admin/stock-transfers` | ✅ |
-| GET/PATCH | `/api/v1/admin/stock-transfers/:id` | ✅ |
-| GET/POST | `/api/v1/admin/store-stock-requests` | ✅ |
-| GET/PATCH | `/api/v1/admin/store-stock-requests/:id` | ✅ |
-| GET/POST | `/api/v1/admin/batch-write-offs` | ✅ |
+### Supplier Portal (`/supplier/...`)
 
-### Procurement
-| Method | Path | Status |
+| Page | Status | Notes |
 |---|---|---|
-| GET/POST | `/api/v1/admin/purchases/vendors` | ✅ |
-| GET/PUT/PATCH/DELETE | `/api/v1/admin/purchases/vendors/:id` | ✅ |
-| GET/POST | `/api/v1/admin/purchases/orders` | ✅ |
-| GET/PUT | `/api/v1/admin/purchases/orders/:id` | ✅ |
-| POST | `/api/v1/admin/purchases/orders/:id/issue` | ✅ |
-| POST | `/api/v1/admin/purchases/orders/:id/cancel` | ✅ |
-| POST | `/api/v1/admin/purchases/orders/:id/convert-to-bill` | ✅ |
-| GET | `/api/v1/admin/purchases/bills` | ✅ |
-| GET/PUT | `/api/v1/admin/purchases/bills/:id` | ✅ |
-| POST | `/api/v1/admin/purchases/bills/:id/void` | ✅ |
-| GET | `/api/v1/admin/purchases/bills/:id/grn-invoice` | ✅ |
-| POST | `/api/v1/admin/purchases/bills/:id/mark-stock-received` | ✅ |
-| GET/POST | `/api/v1/admin/purchases/payments` | ✅ |
-| DELETE | `/api/v1/admin/purchases/payments/:id` | ✅ |
-| GET/POST | `/api/v1/admin/purchases/returns` | ❌ Pending |
-| GET/PATCH | `/api/v1/admin/purchases/returns/:id` | ❌ Pending |
-
-### Order (Pending)
-| Method | Path | Status |
-|---|---|---|
-| POST | `/api/v1/customer/orders` | ❌ Pending |
-| GET | `/api/v1/customer/orders` | ❌ Pending |
-| GET | `/api/v1/customer/orders/:id` | ❌ Pending |
-| POST | `/api/v1/customer/cart` | ❌ Pending |
-| GET | `/api/v1/customer/cart` | ❌ Pending |
-| POST | `/api/v1/customer/coupons/apply` | ❌ Pending |
-| GET/PATCH | `/api/v1/admin/orders` | ❌ Pending |
+| `/supplier/login` | ❌ Missing | Backend ready |
+| `/supplier/dashboard` | ❌ Missing | |
+| `/supplier/orders` | ❌ Missing | |
 
 ---
 
-## 8. Microservice Extraction Roadmap
+## What Each Portal Should Have (Feature Scope)
 
-### Pre-requisites (Pehle yeh karo)
-```
-✅ Redis (rate limiter)
-✅ Docker + docker-compose
-✅ API Gateway (initial routing)
-✅ Identity service (first extraction)
-✅ Catalog, Store, Inventory, Procurement initial extractions
-✅ Local MongoDB replica set for transactional writes
-❌ Redis cache (categories + brands)
-❌ Monolith feature complete (Orders, Returns)
-```
+### 🔵 Admin Panel
+**Purpose:** Full system control
 
-### Extraction Order
-Service jitni independent hogi, utni pehle extract karo.
+Core (done): Catalog, Inventory, Procurement, Orders, Stores, Marketing, Roles, Settings
 
-```
-Phase 1 — Foundation
-  ✅ Redis setup (shared rate limiter)
-  └── Redis cache (categories + brands) — pending
-  └── Docker setup (MongoDB, Redis, App containers)
-  └── API Gateway setup
-
-Phase 2 — Feature Complete Karo (Monolith mein)
-  └── Purchase Returns
-  └── Orders + Cart + Coupons
-  └── Frontend pending pages
-
-Phase 3 — Extract (Ek ek karke)
-  ✅ 1. Identity Service (initial extraction; shared DB/source)
-  ✅ 2. Catalog Service (initial extraction; shared DB/stock model)
-  ✅ 3. Store Service (initial extraction; shared DB/source)
-  ✅ 4. Inventory Service (initial extraction; shared DB/domain imports)
-  ✅ 5. Procurement Service (initial extraction; shared DB/domain imports)
-  6. Per-service database ownership + cross-service APIs/events
-  7. Order Service        ← not implemented
-  8. Accounting Service   ← not implemented
-  9. Notification Service ← not implemented
-  10. Settings Service    ← not implemented
-```
-
-### Extraction ke Rules
-- Ek service extract karo, test karo, phir agla
-- `/api/v1/...` URLs same rakhna — Gateway routing change karega, clients nahi
-- Cross-domain `populate` hatao, HTTP calls lagao
-- Shared JWT secret — Gateway verify karega, services trust karenge
+Missing:
+- Customer management (list, block, wallet bonus, loyalty adjust)
+- Vendor management (list, approve/block, view stores)
+- Delivery Man management (list, approve/block, assign zone)
+- Employee management (vendor employees)
+- Loyalty Points config (earn rate, redeem rate)
+- Cashback config (rules, history)
+- Disbursement management (vendor + DM payouts)
+- Subscription packages (vendor plans)
+- Reports (GST, Brand, Expiry, Sales, Ledger, Payables)
+- Activity logs
+- Language & Translation
+- SMS/Email/Firebase config
+- Offline payment methods
+- File Manager
 
 ---
 
-## 9. Implementation Plan
+### 🟢 Vendor Portal
+**Purpose:** Store owner manages their store(s)
 
-### Abhi karna hai (Next steps)
+Must have:
+- Login / Register
+- Dashboard (orders summary, earnings, store stats)
+- Item management (CRUD, stock update, status)
+- Order management (accept, process, cancel)
+- Store profile (edit name, logo, schedule, settings)
+- Coupon management (create/edit own coupons)
+- Banner management (own store banners)
+- Reports (sales, item-wise, date-wise)
+- Withdrawal request (request payout)
+- Subscription (view/renew plan)
+- Employee management (add/remove store employees)
+- Delivery Man management (assign DM to store)
 
-| Step | Kya | Estimated Time | Status |
-|---|---|---|---|
-| 1 | Redis — rate limiter | Done | ✅ |
-| 2 | Redis — catalog cache | 1 din | ❌ |
-| 3 | Purchase Returns backend | 2 din | ❌ |
-| 4 | Orders + Cart + Coupons backend | 1 hafta | ❌ |
-| 5 | Frontend — Stores, Zones, Modules pages | 3 din | ❌ |
-| 6 | Frontend — Warehouse, Stock pages | 3 din | ❌ |
-| 7 | Frontend — Orders pages | 3 din | ❌ |
-| 8 | Docker setup + API Gateway | Done | ✅ |
-| 9 | Identity service initial extraction | Done | ✅ |
-| 10 | Catalog service initial extraction | Done | ✅ |
-| 11 | Store, Inventory, Procurement initial extractions | Done | ✅ |
-| 12 | Per-service DB ownership and cross-service integration | TBD | ❌ |
-
----
-
-## 10. Environment Variables
-
-### Monolith (.env)
-```env
-# Server
-PORT=5000
-NODE_ENV=development
-
-# Docker Compose MongoDB (single-node replica set)
-MONGO_URI=mongodb://localhost:27017/bring_basket
-
-# JWT
-JWT_SECRET=your_secret_here
-JWT_EXPIRES_IN=7d
-
-# CORS
-ALLOWED_ORIGINS=http://localhost:3000
-
-# Redis (abhi pending)
-REDIS_URL=redis://localhost:6379
-```
-
-### Docker Compose service ports
-```env
-Identity:    5001 (internal)
-Catalog:     5002 (internal)
-Store:       5003 (internal)
-Inventory:   5004 (internal)
-Procurement: 5005 (internal)
-Gateway:     3000 (host)
-```
+Nice to have (later):
+- POS system
+- Chat/Conversation
+- Advertisement management
 
 ---
 
-## Notes
+### 🟡 Customer Portal
+**Purpose:** End customer shops and tracks orders
 
-- **MongoDB Replica Set** — Transactions ke liye zaroori hai. Docker Compose local single-node replica set use karta hai. `mongo_data` volume aur `bring_basket` database preserve hote hain; host clients should connect through the replica-set member name `mongo` from the Docker network.
-- **GRN Invoice Storage** — Abhi local `storage/purchase-bill-invoices/` mein hai. Production mein S3 ya equivalent private object storage chahiye. `NODE_ENV=production` pe local storage disabled hai.
-- **`Item.stock`** — Legacy field hai. Actual stock `StoreItemStock` collection mein hai. Jab tak migration complete na ho, yeh field hatao mat.
-- **`PurchaseVendor` vs `Vendor`** — Yeh alag models hain. PurchaseVendor procurement ke liye hai, Vendor store ownership ke liye. Merge mat karo.
+Must have:
+- Login / Register (dedicated pages)
+- Home (banners, categories, stores, popular items)
+- Shop (browse items, add to cart)
+- Cart & Checkout
+- Order history & tracking
+- Profile (edit name, photo, phone)
+- Addresses (add/edit/delete)
+- Wallet (balance, transactions)
+- Wishlist
+- Notifications
+- Reviews (submit after delivery)
+
+Nice to have (later):
+- Loyalty Points page
+- Membership/Subscription
+- Referral code
+- Social login (Google/Facebook)
+- OTP-based password reset
+
+---
+
+### 🔴 Delivery Man Portal
+**Purpose:** DM picks up and delivers orders
+
+Must have:
+- Login (phone + password)
+- Dashboard (online/offline toggle, stats)
+- Current orders (accept, update status)
+- Order history
+- Profile edit
+- Wallet & Earnings (balance, per-order earnings)
+- Notifications
+
+Nice to have (later):
+- Disbursement/Withdrawal request
+- Vehicle management
+- DM Reviews (view ratings received)
+- Chat with customer/store
+
+---
+
+### 🟣 Warehouse Portal
+**Purpose:** Warehouse staff manages stock
+
+Must have:
+- Login (username + password)
+- Dashboard (stock summary)
+- Stock management (view, adjust)
+- Store stock requests (approve, dispatch)
+- Stock transfers (create, dispatch, receive)
+- Stock movements (audit log)
+- Pincode mapping
+
+Nice to have (later):
+- Purchase management (PO, Bills, GRN)
+- Sub-warehouse management
+- Reports
+
+---
+
+### ⚫ Supplier Portal
+**Purpose:** Purchase vendor views their POs and submits invoices
+
+Must have:
+- Login (email + password, invite-based)
+- Dashboard (pending POs, recent bills)
+- Purchase Orders (view issued POs)
+- Purchase Bills (view, upload invoice)
+- Profile (view own details)
+
+---
+
+## Backend — What's Missing
+
+### High Priority
+| Feature | Where |
+|---|---|
+| Loyalty Points earn/redeem API | identity domain |
+| Cashback rules + apply on order | store/orders domain |
+| Admin: Customer management CRUD | identity domain |
+| Admin: Vendor management CRUD | identity domain |
+| Admin: DM management CRUD | identity domain |
+| Vendor Employee auth + CRUD | identity domain |
+| Employee Role CRUD | identity domain |
+| DM Wallet & Earnings | identity domain |
+| Payment Gateways (Razorpay first) | new payment domain |
+
+### Medium Priority
+| Feature | Where |
+|---|---|
+| Admin: Disbursement management | new accounting domain |
+| Admin: Subscription packages CRUD | store domain |
+| Vendor: POS system | vendor domain |
+| Vendor: Reports | vendor domain |
+| Vendor: Withdrawal requests | identity domain |
+| DM: Disbursement/Withdrawal | identity domain |
+| Warehouse Portal APIs | inventory domain |
+| Supplier Portal APIs | procurement domain |
+| Reviews admin management | catalog domain |
+
+### Low Priority
+| Feature | Where |
+|---|---|
+| Activity Logs | new logging domain |
+| Language & Translation | new settings domain |
+| SMS/Email/Firebase config | new settings domain |
+| Newsletter | identity domain |
+| Parcel delivery order type | orders domain |
+| Membership/Subscription plans | identity domain |
+| Chat/Conversation | new chat domain |
+| PDF generation (invoices) | utils |
+| Excel export | utils |
+| WebSockets (real-time tracking) | new ws domain |
+
+---
+
+## Phase Plan (Updated)
+
+### Phase 2 — Customer Portal Complete ✅ BACKEND DONE
+
+**Backend completed:**
+- OTP password reset (forgot → verify → reset)
+- Loyalty Points (transactions, point-transfer to wallet)
+- Cashback (rules, apply, admin CRUD)
+- Wallet add-fund + bonuses
+- Customer management admin APIs (list, view, status, wallet credit, loyalty adjust)
+- Vendor management admin APIs (list, view, status, stores)
+- Delivery Man management admin APIs (list, create, update, status, application approve/deny)
+- Wallet Bonus admin CRUD
+- Vendor register endpoint
+- Vendor portal routes (`/api/v1/vendor/...`)
+
+**New files created:**
+- `models/auth/OtpVerification.js`
+- `models/auth/LoyaltyTransaction.js`
+- `models/store/Cashback.js`
+- `models/store/CashbackHistory.js`
+- `models/store/WalletBonus.js`
+- `domains/identity/customer-otp.controller.js`
+- `domains/identity/loyalty.controller.js`
+- `domains/identity/customers.controller.js`
+- `domains/identity/vendors-admin.controller.js`
+- `domains/identity/delivery-men-admin.controller.js`
+- `domains/store/cashback.controller.js`
+- `domains/store/wallet-bonus.controller.js`
+- `routes/v1/vendor/index.js`
+
+**Frontend still pending for Phase 2**
+
+### Phase 2 Frontend — Customer Portal ✅ DONE
+**Frontend completed:**
+- `/login` + `/register` root pages
+- `/wishlist` page (list, remove, add-to-cart)
+- `(customer)/login` — login + OTP forgot password flow
+- `(customer)/register` — registration
+- `(customer)/profile` — edit profile + stats + quick links
+- `(customer)/wallet` — balance + transactions + add fund
+- `(customer)/loyalty` — history + convert to wallet
+- `(customer)/notifications` — mark read/all
+- `(customer)/orders` — list + cancel + expand details
+- Customer layout with bottom nav
+
+### Phase 3 — Admin Management ✅ DONE
+**Backend completed:** Customer/Vendor/DM management APIs, Cashback, Wallet Bonus
+**Frontend completed:**
+- `/admin/customers` — list, status toggle
+- `/admin/vendors` — list, status toggle
+- `/admin/delivery-men` — list, create, status toggle
+- `/admin/cashback` — CRUD cashback rules
+- `/admin/wallet-bonus` — CRUD wallet bonus
+- Sidebar: User management + Promotions groups added
+- `admin-resources.ts`: customers, vendors, delivery-men, cashback, wallet-bonus entries
+
+### Phase 4 — Vendor Portal ✅ DONE
+**Frontend completed:**
+- `/vendor/login` — email + password login
+- `/vendor/register` — vendor self-registration
+- `/vendor/dashboard` — stats + quick actions
+- `/vendor/items` — full CRUD + status toggle + search + pagination
+- `/vendor/orders` — list + filter by status + update status
+- `/vendor/stores` — view assigned stores
+- Vendor layout with sidebar (desktop) + bottom nav (mobile)
+- `vendor.store.ts` — Zustand auth store
+- `lib/api/vendor.ts` — Axios client with token
+
+### Phase 5 — Delivery Man Complete
+Backend: DM wallet, earnings, disbursement
+Frontend: DM wallet page, profile edit, earnings
+
+### Phase 6 — Warehouse & Supplier Portals
+Frontend: Warehouse portal (login, dashboard, stock, requests), Supplier portal
+
+### Phase 7 — Payment Gateways ✅ DONE
+**Backend completed:**
+- `models/store/Payment.js` — payment transaction model
+- `domains/store/razorpay.controller.js` — create order, verify, webhook, refund, history
+- `routes/v1/payment/index.js` — payment routes
+- Order service: `digital_payment` + `wallet` payment methods added
+- Wallet payment: balance check + debit in transaction
+- Webhook: signature verification + auto-fulfill
+- Gateway: `/api/v1/payment/*` routes added
+
+**Frontend completed:**
+- `lib/razorpay.ts` — script loader + openRazorpay utility
+- `components/payment/RazorpayButton.tsx` — reusable payment button
+- `(customer)/checkout/page.tsx` — full checkout (COD + Razorpay + Wallet)
+- `(customer)/wallet/page.tsx` — Razorpay top-up added
+
+**New API endpoints:**
+```
+POST /payment/razorpay/create-order   (customerAuth)
+POST /payment/razorpay/verify         (customerAuth)
+POST /payment/razorpay/webhook        (public, signature verified)
+POST /payment/razorpay/refund         (adminAuth)
+GET  /payment/razorpay/history        (customerAuth)
+```
+
+**Setup required:**
+- `.env`: Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
+- `.env.local`: Set `NEXT_PUBLIC_RAZORPAY_KEY_ID`
+- Razorpay Dashboard: Add webhook URL `https://yourdomain.com/api/v1/payment/razorpay/webhook`
+
+### Phase 8 — Delivery Man Complete + Customer Addresses
+Backend: DM wallet, earnings
+Frontend: DM wallet page, Customer addresses page
+
+### Phase 9 — Warehouse & Supplier Portals
+Frontend: Warehouse portal, Supplier portal
+
+### Phase 10 — Admin Reports & Config
+Backend: Reports, SMS/Email config, Activity logs
+Frontend: Reports pages
+
+---
+
+## Vendor Portal Routes (`/vendor/...`)
+
+| Page | Status |
+|---|---|
+| `/vendor/login` | ✅ Done |
+| `/vendor/register` | ✅ Done |
+| `/vendor/dashboard` | ✅ Done |
+| `/vendor/items` | ✅ Done |
+| `/vendor/orders` | ✅ Done |
+| `/vendor/stores` | ✅ Done |
+| `/vendor/employees` | ❌ Missing |
+| `/vendor/withdrawal` | ❌ Missing |
+| `/vendor/reports` | ❌ Missing |
+
+### Phase 5 — Delivery Man Complete
+Backend: DM wallet, earnings, disbursement
+Frontend: DM wallet page, profile edit, earnings
+
+### Phase 6 — Payment Gateways
+Backend: Razorpay → Stripe → PhonePe → others
+
+### Phase 7 — Warehouse & Supplier Portals
+Frontend: Warehouse portal, Supplier portal
+
+### Phase 8 — Admin Reports & Config
+Backend: Reports, SMS/Email config, Activity logs
+Frontend: Reports pages, config pages
+
+### Phase 9 — Advanced
+WebSockets, PDF, Excel, Multi-module, Parcel, POS
+
+---
+
+## Tech Stack
+
+| Layer | Tech |
+|---|---|
+| Backend | Node.js + Express v5 |
+| Database | MongoDB + Mongoose v9 (replica set) |
+| Cache | Redis |
+| Auth | JWT (jsonwebtoken + bcryptjs) |
+| Frontend | Next.js 16 + React 19 + TypeScript |
+| Styling | Tailwind CSS v4 |
+| State | Zustand |
+| API Client | TanStack Query + Axios |
+| UI | shadcn/ui |
+| Validation | Zod (frontend) |
+
+## Service Ports
+
+| Service | Port | Status |
+|---|---|---|
+| API Gateway | 3000 | ✅ |
+| Frontend | 3001 | ✅ |
+| Backend monolith | 5000 | ✅ |
+| MongoDB | 27017 | ✅ |
+| Redis | 6379 | ✅ |
+
+## Coding Rules
+
+1. Backend: `routes → controller → service → model` pattern
+2. Response format: `{ success, data, message }` always
+3. Pagination: `{ data, pagination: { total, page, limit, pages } }`
+4. No cross-domain populate — use HTTP calls between domains
+5. JWT verified at middleware, controllers trust `req.user`
+6. MongoDB transactions required for stock-changing operations
+7. All monetary values stored as `Number` (not Decimal128)
+8. Frontend: TanStack Query for all API calls, Zustand for auth state

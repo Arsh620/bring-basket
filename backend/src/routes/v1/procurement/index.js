@@ -5,6 +5,7 @@ const purchaseVendors = require('../../../domains/procurement/purchase-vendors.c
 const purchaseOrders = require('../../../domains/procurement/purchase-orders.controller');
 const purchaseBills = require('../../../domains/procurement/purchase-bills.controller');
 const purchasePayments = require('../../../domains/procurement/purchase-payments.controller');
+const purchaseReturns = require('../../../domains/procurement/purchase-returns.controller');
 const purchaseBillInvoiceUpload = require('../../../domains/procurement/purchase-bill-invoice-upload');
 
 const adminOnly = [adminAuth, checkRole('admin')];
@@ -40,5 +41,16 @@ router.post(
 router.get('/purchases/payments', adminOnly, purchasePayments.getAll);
 router.post('/purchases/payments', adminOnly, purchasePayments.record);
 router.delete('/purchases/payments/:id', adminOnly, purchasePayments.remove);
+
+router.get('/purchases/returns', adminOnly, purchaseReturns.getAll);
+router.get('/purchases/returns/bills', adminOnly, purchaseReturns.getBills);
+router.get('/purchases/returns/bills/:id/items', adminOnly, purchaseReturns.getBillItems);
+router.get('/purchases/returns/bills/:id/template.csv', adminOnly, purchaseReturns.exportBillItems);
+router.get('/purchases/returns/export.csv', adminOnly, purchaseReturns.exportAll);
+router.post('/purchases/returns/import', adminOnly, purchaseReturns.importCsv);
+router.post('/purchases/returns', adminOnly, purchaseReturns.create);
+router.get('/purchases/returns/:id', adminOnly, purchaseReturns.getOne);
+router.post('/purchases/returns/:id/approve', adminOnly, purchaseReturns.approve);
+router.post('/purchases/returns/:id/void', adminOnly, purchaseReturns.void);
 
 module.exports = router;

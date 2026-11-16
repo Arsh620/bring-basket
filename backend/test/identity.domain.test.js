@@ -25,6 +25,8 @@ test('identity endpoints expose the existing portal auth and admin management ro
     ['GET', '/admin/roles'], ['POST', '/admin/roles'],
     ['GET', '/admin/roles/:id'], ['PUT', '/admin/roles/:id'], ['DELETE', '/admin/roles/:id'],
     ['POST', '/customer/auth/login'], ['POST', '/customer/auth/register'], ['GET', '/customer/auth/me'],
+    ['GET', '/customer/addresses'], ['POST', '/customer/addresses'],
+    ['PUT', '/customer/addresses/:id'], ['DELETE', '/customer/addresses'],
     ['POST', '/vendor/auth/login'], ['GET', '/vendor/auth/me'], ['POST', '/vendor/auth/logout'],
     ['POST', '/supplier/auth/login'], ['GET', '/supplier/auth/me'], ['POST', '/supplier/auth/logout'],
     ['POST', '/deliveryman/auth/login'], ['GET', '/deliveryman/auth/me'], ['POST', '/deliveryman/auth/logout'],
@@ -44,6 +46,9 @@ test('admin management and portal profile/logout endpoints retain authentication
     } else if (['/admin/auth/me', '/admin/auth/logout'].includes(path)) {
       assert.equal(layer.route.stack.length, 3, `${method} ${path} must require admin authentication and role checks`);
       assert.equal(auth, adminAuth, `${method} ${path} must use the admin auth middleware`);
+    } else if (path.startsWith('/customer/addresses')) {
+      assert.equal(layer.route.stack.length, 2, `${method} ${path} must require customer authentication`);
+      assert.equal(auth, customerAuth, `${method} ${path} must use customer authentication`);
     } else if (/\/auth\/(me|logout)$/.test(path)) {
       const portalAuth = {
         '/customer/auth/me': customerAuth,

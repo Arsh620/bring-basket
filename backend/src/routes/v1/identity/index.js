@@ -3,6 +3,7 @@ const adminAuth = require('../../../domains/identity/admin-auth.controller');
 const admins = require('../../../domains/identity/admins.controller');
 const roles = require('../../../domains/identity/roles.controller');
 const customerAuth = require('../../../domains/identity/customer-auth.controller');
+const customerAddresses = require('../../../domains/identity/customer-addresses.controller');
 const vendorAuth = require('../../../domains/identity/vendor-auth.controller');
 const supplierAuth = require('../../../domains/identity/supplier-auth.controller');
 const deliverymanAuth = require('../../../domains/identity/deliveryman-auth.controller');
@@ -45,9 +46,14 @@ router.delete('/admin/roles/:id', adminOnly, roles.remove);
 router.post('/customer/auth/login', authLimiter, customerAuth.login);
 router.post('/customer/auth/register', authLimiter, customerAuth.register);
 router.get('/customer/auth/me', customerMiddleware, customerAuth.me);
+router.get('/customer/addresses', customerMiddleware, customerAddresses.list);
+router.post('/customer/addresses', customerMiddleware, customerAddresses.create);
+router.put('/customer/addresses/:id', customerMiddleware, customerAddresses.update);
+router.delete('/customer/addresses', customerMiddleware, customerAddresses.remove);
 
 // Vendor auth
 router.post('/vendor/auth/login', authLimiter, vendorAuth.login);
+router.post('/vendor/auth/register', authLimiter, vendorAuth.register);
 router.get('/vendor/auth/me', vendorMiddleware, vendorAuth.me);
 router.post('/vendor/auth/logout', vendorMiddleware, vendorAuth.logout);
 

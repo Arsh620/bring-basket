@@ -26,7 +26,7 @@ exports.globalLimiter = rateLimit({
 exports.authLimiter = rateLimit({
   ...baseOptions,
   windowMs: 15 * 60 * 1000,
-  max: 10,
+  max: process.env.NODE_ENV === 'production' ? 10 : 100,
   message: { success: false, message: 'Too many login attempts, please try again later' },
   store: makeStore(),
 });
