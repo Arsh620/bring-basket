@@ -9,6 +9,7 @@ const logger = require('./src/config/logger');
 const { connectRedis, getRedis, closeRedis } = require('./src/config/redis');
 const sanitize = require('./src/middleware/sanitize');
 const errorHandler = require('./src/middleware/errorHandler');
+const serviceAuth = require('./src/middleware/service-auth')('backend', 'store-service');
 
 require('./src/models/auth/Vendor');
 require('./src/models/store/Module');
@@ -47,6 +48,15 @@ app.get('/health', (req, res) => {
 const storeRoutes = require('./src/routes/v1/store');
 app.use('/api/v1/admin', storeRoutes);
 app.use('/api/v1/customer', storeRoutes.customerRouter);
+
+const internalAdminRoutes = express.Router();
+internalAdminRoutes.use(serviceAuth);
+internalAdminRoutes.get(
+  '/dashboard-store-ids',
+  require('./src/domains/store/dashboard.controller').getStoreIds,
+);
+app.use('/internal/admin', internalAdminRoutes);
+
 app.use(errorHandler);
 
 const shutdown = async (signal) => {

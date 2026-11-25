@@ -1,6 +1,7 @@
 require('dotenv').config();
 const mysql = require('mysql2/promise');
 const mongoose = require('mongoose');
+const { normalizeStorefrontCatalog } = require('./normalizeStorefrontCatalog');
 
 // Tables to migrate in order (dependencies first)
 const TABLES = [
@@ -93,6 +94,66 @@ const rowToCamel = (row) => {
 
 const BATCH_SIZE = 500;
 
+const roleReferenceMappings = [
+  { collection: 'admins', field: 'roleId', target: 'adminroles', required: true },
+  { collection: 'admins', field: 'zoneId', target: 'zones', required: false },
+  { collection: 'employeeroles', field: 'storeId', target: 'stores', required: false },
+  { collection: 'vendoremployees', field: 'employeeRoleId', target: 'employeeroles', required: true },
+  { collection: 'vendoremployees', field: 'vendorId', target: 'vendors', required: true },
+  { collection: 'vendoremployees', field: 'storeId', target: 'stores', required: true },
+  { collection: 'stores', field: 'vendorId', target: 'vendors', required: true },
+];
+
+async function backfillRoleReferences(mongoDb) {
+  const legacyIdMaps = new Map();
+  const unresolvedReferences = [];
+  let updatedReferences = 0;
+
+  for (const { target } of roleReferenceMappings) {
+    if (legacyIdMaps.has(target)) continue;
+    const records = await mongoDb.collection(target)
+      .find({ legacyId: { $exists: true } })
+      .project({ _id: 1, legacyId: 1 })
+      .toArray();
+    legacyIdMaps.set(target, new Map(records.map(({ _id, legacyId }) => [String(legacyId), _id])));
+  }
+
+  for (const mapping of roleReferenceMappings) {
+    const collection = mongoDb.collection(mapping.collection);
+    const references = await collection
+      .find({ [mapping.field]: { $type: 'number' } })
+      .project({ _id: 1, [mapping.field]: 1 })
+      .toArray();
+    const updates = [];
+
+    for (const record of references) {
+      const legacyId = record[mapping.field];
+      if (!mapping.required && legacyId === 0) {
+        updates.push({ updateOne: { filter: { _id: record._id }, update: { $set: { [mapping.field]: null } } } });
+        continue;
+      }
+
+      const targetId = legacyIdMaps.get(mapping.target).get(String(legacyId));
+      if (!targetId) {
+        unresolvedReferences.push(`${mapping.collection}.${mapping.field}=${legacyId}`);
+        continue;
+      }
+      updates.push({ updateOne: { filter: { _id: record._id }, update: { $set: { [mapping.field]: targetId } } } });
+    }
+
+    if (updates.length) {
+      const result = await collection.bulkWrite(updates, { ordered: true });
+      updatedReferences += result.modifiedCount;
+    }
+  }
+
+  if (unresolvedReferences.length) {
+    throw new Error(`Could not resolve ${unresolvedReferences.length} role/store references: ${unresolvedReferences.slice(0, 10).join(', ')}`);
+  }
+  console.log(`  ✓  Role and store references backfilled — ${updatedReferences} references`);
+  return updatedReferences;
+}
+
 async function migrateTable(mysqlConn, mongoDb, tableName) {
   const collectionName = tableName.replace(/_/g, '');
   const collection = mongoDb.collection(collectionName);
@@ -177,6 +238,11 @@ async function main() {
     }
   }
 
+  await backfillRoleReferences(mongoDb);
+  const storefront = await mongoose.connection.transaction((session) =>
+    normalizeStorefrontCatalog(mongoDb, { apply: true, session }));
+  console.log('Storefront catalog normalized:', storefront);
+
   console.log(`\n✅ Migration complete!`);
   console.log(`   Total rows inserted: ${totalInserted}`);
   console.log(`   Tables skipped: ${skipped}`);
@@ -185,7 +251,11 @@ async function main() {
   await mongoose.disconnect();
 }
 
-main().catch((err) => {
-  console.error('Migration failed:', err.message);
-  process.exitCode = 1;
-});
+if (require.main === module) {
+  main().catch((err) => {
+    console.error('Migration failed:', err.message);
+    process.exitCode = 1;
+  });
+}
+
+module.exports = { backfillRoleReferences, roleReferenceMappings };

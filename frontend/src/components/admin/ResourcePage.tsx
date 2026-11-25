@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AxiosError } from 'axios';
@@ -33,11 +33,13 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table';
-import { adminResources, type AdminField, type AdminResource } from '@/lib/admin-resources';
+import { adminResources, masterAdminResources, type AdminField, type AdminResource } from '@/lib/admin-resources';
 import api from '@/lib/api/client';
+import { canAccessAdminModule } from '@/lib/admin-permissions';
+import { useAuthStore } from '@/store/auth.store';
 
 type DataRow = Record<string, unknown> & { _id: string };
-type FormValue = string | boolean;
+type FormValue = string | boolean | string[];
 
 interface ListResult {
   rows: DataRow[];
@@ -54,6 +56,18 @@ function getErrorMessage(error: unknown) {
 function fieldValue(row: DataRow | null, field: AdminField): FormValue {
   const value = row?.[field.key];
   if (field.type === 'boolean') return typeof value === 'boolean' ? value : true;
+  if (field.type === 'multi-select') {
+    if (Array.isArray(value)) return value.map(String);
+    if (typeof value === 'string') {
+      try {
+        const parsed: unknown = JSON.parse(value);
+        return Array.isArray(parsed) ? parsed.map(String) : [];
+      } catch {
+        return [];
+      }
+    }
+    return [];
+  }
   if (field.type === 'json') return value == null ? '' : JSON.stringify(value, null, 2);
   if (field.type === 'date' && value) return new Date(String(value)).toISOString().slice(0, 10);
   if (value && typeof value === 'object' && '_id' in value) return String((value as { _id: string })._id);
@@ -62,8 +76,8 @@ function fieldValue(row: DataRow | null, field: AdminField): FormValue {
 
 function displayValue(value: unknown, columnType?: string) {
   if (columnType === 'status') {
-    if (value === true || value === 'active') return <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">Active</Badge>;
-    if (value === false || value === 'inactive') return <Badge variant="secondary" className="bg-gray-100 text-gray-600">Inactive</Badge>;
+    if (value === true || value === 'active' || value === 1) return <Badge className="bg-emerald-50 text-emerald-700 hover:bg-emerald-50">Active</Badge>;
+    if (value === false || value === 'inactive' || value === 0) return <Badge variant="secondary" className="bg-gray-100 text-gray-600">Inactive</Badge>;
   }
   if (value == null || value === '') return <span className="text-gray-400">—</span>;
   if (typeof value === 'boolean') return value ? 'Yes' : 'No';
@@ -106,6 +120,54 @@ function ResourceSelectOptions({ field }: { field: AdminField }) {
   );
 }
 
+function ResourceMultiOptions({
+  field,
+  value,
+  onChange,
+}: {
+  field: AdminField;
+  value: FormValue;
+  onChange: (value: FormValue) => void;
+}) {
+  const query = useQuery({
+    queryKey: ['admin-options', field.optionsPath],
+    queryFn: async () => {
+      const response = await api.get(field.optionsPath!);
+      return (response.data.data ?? []) as DataRow[];
+    },
+    enabled: Boolean(field.optionsPath),
+  });
+  const selected = Array.isArray(value) ? value : [];
+
+  if (query.isError) {
+    return <p className="mt-2 text-sm text-red-600">Permissions could not be loaded. Reload to retry.</p>;
+  }
+
+  return (
+    <div className="mt-2 grid gap-2 rounded-xl border border-gray-200 p-3 sm:grid-cols-2">
+      {query.isLoading ? <p className="text-sm text-gray-500">Loading permissions…</p> : null}
+      {(query.data ?? []).map((option) => {
+        const optionValue = String(option[field.optionValue ?? '_id'] ?? option._id);
+        const optionLabel = String(option[field.optionLabel ?? 'name'] ?? option.name ?? option._id);
+        return (
+          <label key={optionValue} className="flex cursor-pointer items-center gap-2 text-sm text-gray-700">
+            <input
+              id={`field-${field.key}-${optionValue}`}
+              type="checkbox"
+              checked={selected.includes(optionValue)}
+              onChange={(event) => onChange(event.target.checked
+                ? [...selected, optionValue]
+                : selected.filter((item) => item !== optionValue))}
+              className="h-4 w-4 accent-[#0b55ad]"
+            />
+            {optionLabel}
+          </label>
+        );
+      })}
+    </div>
+  );
+}
+
 function EditorField({
   field,
   value,
@@ -118,7 +180,7 @@ function EditorField({
   const commonClass = 'mt-1.5 w-full rounded-xl border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-800 shadow-sm outline-none transition focus:border-[#0b55ad] focus:ring-4 focus:ring-[#0b55ad]/10';
 
   return (
-    <div className={field.type === 'textarea' || field.type === 'json' ? 'sm:col-span-2' : ''}>
+    <div className={field.type === 'textarea' || field.type === 'json' || field.type === 'multi-select' ? 'sm:col-span-2' : ''}>
       <Label htmlFor={`field-${field.key}`} className="text-sm font-medium text-gray-700">
         {field.label}{field.required && <span className="ml-1 text-red-500">*</span>}
       </Label>
@@ -154,6 +216,8 @@ function EditorField({
             </>
           )}
         </select>
+      ) : field.type === 'multi-select' ? (
+        <ResourceMultiOptions field={field} value={value} onChange={onChange} />
       ) : field.type === 'textarea' || field.type === 'json' ? (
         <textarea
           id={`field-${field.key}`}
@@ -413,17 +477,32 @@ function UnitConversionsDialog({ group, onClose }: { group: DataRow; onClose: ()
   );
 }
 
-export function ResourcePage({ resourceKey }: { resourceKey: string }) {
-  const resource = adminResources[resourceKey];
+export function ResourcePage({ resourceKey, navigation }: { resourceKey: string; navigation?: ReactNode }) {
+  return <AdminLayout><ResourceContent resourceKey={resourceKey} navigation={navigation} /></AdminLayout>;
+}
+
+function ResourceContent({ resourceKey, navigation }: { resourceKey: string; navigation?: ReactNode }) {
+  const resource = masterAdminResources[resourceKey] ?? adminResources[resourceKey];
+  const admin = useAuthStore((state) => state.admin);
+  const showZoneFilter = Boolean(resource?.zoneFilter) && canAccessAdminModule(admin, 'zone');
   const queryClient = useQueryClient();
   const [search, setSearch] = useState('');
+  const [zoneId, setZoneId] = useState('');
   const [page, setPage] = useState(1);
   const [editorRow, setEditorRow] = useState<DataRow | null | undefined>(undefined);
   const [extraRow, setExtraRow] = useState<DataRow | null>(null);
   const [busyRow, setBusyRow] = useState<string | null>(null);
+  const zonesQuery = useQuery({
+    queryKey: ['admin-zone-filter-options'],
+    queryFn: async () => {
+      const response = await api.get('/admin/zones');
+      return (response.data.data ?? []) as DataRow[];
+    },
+    enabled: showZoneFilter,
+  });
 
   const listQuery = useQuery({
-    queryKey: ['admin-resource', resourceKey, page, resource?.searchable ? search : ''],
+    queryKey: ['admin-resource', resourceKey, page, resource?.searchable ? search : '', zoneId],
     enabled: Boolean(resource),
     queryFn: async (): Promise<ListResult> => {
       const params: Record<string, string | number> = {};
@@ -432,6 +511,7 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
         params.limit = 20;
       }
       if (resource.searchable && search.trim()) params.search = search.trim();
+      if (resource.zoneFilter && zoneId) params.zone_id = zoneId;
       const response = await api.get(resource.endpoint, { params });
       const rows = (response.data.data ?? []) as DataRow[];
       return { rows, total: response.data.pagination?.total ?? rows.length };
@@ -448,18 +528,23 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
   }, [listQuery.data?.rows, resource, search]);
 
   if (!resource) {
-    return <AdminLayout><div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-800">This admin section is not configured.</div></AdminLayout>;
+    return <div className="rounded-2xl border border-red-200 bg-red-50 p-6 text-red-800">This admin section is not configured.</div>;
   }
 
   const totalPages = resource.paginated ? Math.max(1, Math.ceil((listQuery.data?.total ?? 0) / 20)) : 1;
 
   const toggleStatus = async (row: DataRow) => {
     if (!resource.statusEndpoint || !resource.statusValues) return;
-    const current = row.status;
-    const next = current === resource.statusValues.active ? resource.statusValues.inactive : resource.statusValues.active;
     setBusyRow(row._id);
     try {
-      await api.patch(resource.statusEndpoint.replace(':id', row._id), { status: next });
+      const endpoint = resource.statusEndpoint.replace(':id', row._id);
+      if (resource.toggleOnly) {
+        await api.patch(endpoint);
+      } else {
+        const current = row.status;
+        const next = current === resource.statusValues.active ? resource.statusValues.inactive : resource.statusValues.active;
+        await api.patch(endpoint, { status: next });
+      }
       await queryClient.invalidateQueries({ queryKey: ['admin-resource', resource.key] });
       toast.success(`${resource.singular} status updated`);
     } catch (error) {
@@ -485,14 +570,15 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
   };
 
   return (
-    <AdminLayout>
+    <>
       <div className="mx-auto max-w-[1440px] space-y-6">
+        {navigation}
         <div className="flex flex-wrap items-end justify-between gap-4">
           <div>
-            <Link href="/admin/dashboard" className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition hover:text-[#0b55ad]">
+            {!navigation && <Link href="/admin/dashboard" className="mb-3 inline-flex items-center gap-1.5 text-sm font-medium text-gray-500 transition hover:text-[#0b55ad]">
               <ArrowLeft size={15} /> Dashboard
-            </Link>
-            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#0b55ad]">Bring Basket · Admin</p>
+            </Link>}
+            {!navigation && <p className="text-xs font-semibold uppercase tracking-[0.18em] text-[#0b55ad]">Bring Basket · Admin</p>}
             <h1 className="mt-1 text-3xl font-bold tracking-tight text-[#0b2346]">{resource.title}</h1>
             <p className="mt-1 max-w-2xl text-sm text-gray-500">{resource.description}</p>
           </div>
@@ -534,15 +620,28 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
               <h2 className="font-semibold text-[#0b2346]">All {resource.title.toLowerCase()}</h2>
               <p className="mt-0.5 text-xs text-gray-500">Search, update or manage records in your workspace.</p>
             </div>
-            <div className="relative w-full sm:max-w-xs">
-              <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              <Input
-                value={search}
-                onChange={(event) => { setSearch(event.target.value); setPage(1); }}
-                placeholder={`Search ${resource.title.toLowerCase()}…`}
-                aria-label={`Search ${resource.title}`}
-                className="h-10 rounded-xl border-gray-200 bg-[#f7f9fc] pl-9 focus-visible:border-[#0b55ad] focus-visible:ring-[#0b55ad]/15"
-              />
+            <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row">
+              <div className="relative w-full sm:w-64">
+                <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Input
+                  value={search}
+                  onChange={(event) => { setSearch(event.target.value); setPage(1); }}
+                  placeholder={`Search ${resource.title.toLowerCase()}…`}
+                  aria-label={`Search ${resource.title}`}
+                  className="h-10 rounded-xl border-gray-200 bg-[#f7f9fc] pl-9 focus-visible:border-[#0b55ad] focus-visible:ring-[#0b55ad]/15"
+                />
+              </div>
+              {showZoneFilter && (
+                <select
+                  value={zoneId}
+                  onChange={(event) => { setZoneId(event.target.value); setPage(1); }}
+                  aria-label="Filter employees by zone"
+                  className="h-10 rounded-xl border border-gray-200 bg-[#f7f9fc] px-3 text-sm text-gray-700 outline-none focus:border-[#0b55ad] focus:ring-4 focus:ring-[#0b55ad]/10"
+                >
+                  <option value="">All zones</option>
+                  {(zonesQuery.data ?? []).map((zone) => <option key={zone._id} value={zone._id}>{String(zone.name ?? 'Unnamed zone')}</option>)}
+                </select>
+              )}
             </div>
           </div>
 
@@ -570,6 +669,7 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
                   <TableRow className="bg-[#f5f8fc] hover:bg-[#f5f8fc]">
                     {resource.columns.map((column) => <TableHead key={column.key} className="px-5 py-3 text-xs font-semibold uppercase tracking-wide text-[#526783]">{column.label}</TableHead>)}
                     {!resource.readOnly && <TableHead className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-[#526783]">Actions</TableHead>}
+                    {resource.readOnly && resource.statusEndpoint && <TableHead className="px-5 py-3 text-right text-xs font-semibold uppercase tracking-wide text-[#526783]">Status</TableHead>}
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -592,7 +692,7 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
                                 onClick={() => void toggleStatus(row)}
                                 className="rounded-lg"
                               >
-                                {busyRow === row._id ? <LoaderCircle size={14} className="animate-spin" /> : row.status === resource.statusValues.active ? 'Disable' : 'Enable'}
+                                {busyRow === row._id ? <LoaderCircle size={14} className="animate-spin" /> : (() => { const statusField = resource.toggleOnly ? (row.isActive ?? row.status) : row.status; return statusField === resource.statusValues.active ? 'Disable' : 'Enable'; })()}
                               </Button>
                             )}
                             {resource.extraAction && (
@@ -608,6 +708,20 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
                               </>
                             )}
                           </div>
+                        </TableCell>
+                      )}
+                      {resource.readOnly && resource.statusEndpoint && resource.statusValues && (
+                        <TableCell className="px-5 py-3.5 text-right">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={busyRow === row._id}
+                            onClick={() => void toggleStatus(row)}
+                            className="rounded-lg"
+                          >
+                            {busyRow === row._id ? <LoaderCircle size={14} className="animate-spin" /> : row.status === resource.statusValues.active ? 'Disable' : 'Enable'}
+                          </Button>
                         </TableCell>
                       )}
                     </TableRow>
@@ -630,6 +744,6 @@ export function ResourcePage({ resourceKey }: { resourceKey: string }) {
       {editorRow !== undefined && <ResourceEditor resource={resource} row={editorRow} onClose={() => setEditorRow(undefined)} />}
       {extraRow && resource.extraAction === 'schedule' && <StoreScheduleDialog store={extraRow} onClose={() => setExtraRow(null)} />}
       {extraRow && resource.extraAction === 'conversions' && <UnitConversionsDialog group={extraRow} onClose={() => setExtraRow(null)} />}
-    </AdminLayout>
+    </>
   );
 }

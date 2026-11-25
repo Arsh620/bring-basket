@@ -14,6 +14,7 @@ COPY backend/src/config/redis.js ./src/config/redis.js
 COPY backend/src/domains/identity/wallet.controller.js ./src/domains/identity/wallet.controller.js
 COPY backend/src/domains/identity/loyalty.controller.js ./src/domains/identity/loyalty.controller.js
 COPY backend/src/domains/identity/customers.controller.js ./src/domains/identity/customers.controller.js
+COPY backend/src/domains/orders/order.model.js ./src/domains/orders/order.model.js
 COPY backend/src/domains/store/cashback.controller.js ./src/domains/store/cashback.controller.js
 COPY backend/src/domains/store/wallet-bonus.controller.js ./src/domains/store/wallet-bonus.controller.js
 COPY backend/src/middleware/auth.js ./src/middleware/auth.js
@@ -21,6 +22,8 @@ COPY backend/src/middleware/errorHandler.js ./src/middleware/errorHandler.js
 COPY backend/src/middleware/roleCheck.js ./src/middleware/roleCheck.js
 COPY backend/src/middleware/rateLimiter.js ./src/middleware/rateLimiter.js
 COPY backend/src/middleware/sanitize.js ./src/middleware/sanitize.js
+COPY backend/src/models/auth/Admin.js ./src/models/auth/Admin.js
+COPY backend/src/models/auth/AdminRole.js ./src/models/auth/AdminRole.js
 COPY backend/src/models/auth/User.js ./src/models/auth/User.js
 COPY backend/src/models/auth/WalletTransaction.js ./src/models/auth/WalletTransaction.js
 COPY backend/src/models/auth/LoyaltyTransaction.js ./src/models/auth/LoyaltyTransaction.js

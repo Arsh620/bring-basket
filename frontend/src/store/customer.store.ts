@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-interface Customer {
+export interface Customer {
   _id: string;
   fName: string;
   lName?: string;
@@ -10,6 +10,19 @@ interface Customer {
   walletBalance: number;
   loyaltyPoint: number;
   currentMembershipTier: 'free' | 'silver' | 'gold';
+}
+
+export function customerAccountId(customer: Customer | null, token: string | null): string | undefined {
+  if (customer?._id) return customer._id;
+  try {
+    // Older shop sessions persisted only the token. Its account ID scopes client-side query keys.
+    const encoded = token?.split('.')[1];
+    if (!encoded) return undefined;
+    const { id } = JSON.parse(atob(encoded.replace(/-/g, '+').replace(/_/g, '/')));
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 interface CustomerAuthState {

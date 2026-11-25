@@ -34,7 +34,6 @@ const paymentSchema = new mongoose.Schema({
 }, { timestamps: true });
 
 paymentSchema.index({ userId: 1, createdAt: -1 });
-paymentSchema.index({ razorpayOrderId: 1 });
 paymentSchema.index({ referenceId: 1 });
 
 module.exports = mongoose.models.Payment || mongoose.model('Payment', paymentSchema);

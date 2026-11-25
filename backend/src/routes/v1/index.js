@@ -11,5 +11,9 @@ router.use('/deliveryman', require('./deliveryman'));
 router.use('/vendor', require('./vendor'));
 router.use('/admin', require('./admin'));
 router.use('/payment', require('./payment'));
+router.use('/warehouse', require('./warehouse'));
+router.use('/', require('./pos'));
+router.use('/admin/account', require('./accounting'));
+router.use('/admin', require('./retention'));
 
 module.exports = router;

@@ -35,6 +35,7 @@ app.get('/health', (req, res) => {
 // ── Auth rate limiter on login routes ────────────────────────────────────────
 app.use(/^\/api\/v1\/.+\/auth\/login$/, authLimiter);
 app.use(/^\/api\/v1\/.+\/auth\/register$/, authLimiter);
+app.use(/^\/api\/v1\/supplier\/registration$/, authLimiter);
 
 // ── Global rate limiter ───────────────────────────────────────────────────────
 app.use(globalLimiter);
@@ -52,6 +53,11 @@ for (const [name, config] of Object.entries(serviceRoutes)) {
         changeOrigin: true,
         pathRewrite: (path) => (path.startsWith(prefix) ? path : `${prefix}${path}`),
         on: {
+          proxyReq: (proxyReq, req) => {
+            if (name !== 'identity') return;
+            // Identity trusts one proxy hop. Use the gateway's observed peer address.
+            proxyReq.setHeader('X-Forwarded-For', req.ip);
+          },
           error: (err, req, res) => {
             logger.error({ message: `Proxy error [${name}]`, error: err.message, path: req.path });
             res.status(502).json({ success: false, message: `${name} service unavailable` });

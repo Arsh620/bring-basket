@@ -12,7 +12,7 @@ const run = (handler) => async (req, res, next) => {
 };
 
 exports.getAll = run(async (req, res) => {
-  const { transfers, pagination } = await stockTransferService.getAll(req.query);
+  const { transfers, pagination } = await stockTransferService.getAll(req.warehouseQuery ?? req.query);
   res.json({ success: true, data: transfers, pagination });
 });
 
@@ -39,4 +39,9 @@ exports.receive = run(async (req, res) => {
 exports.reject = run(async (req, res) => {
   const transfer = await stockTransferService.reject(req.params.id, req.body.rejectReason);
   success(res, transfer, 'Rejected');
+});
+
+exports.cancel = run(async (req, res) => {
+  const transfer = await stockTransferService.cancel(req.params.id);
+  success(res, transfer, 'Cancelled');
 });

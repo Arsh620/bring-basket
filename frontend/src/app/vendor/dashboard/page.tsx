@@ -1,10 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { ShoppingBag, Package, TrendingUp, Store, RefreshCw } from 'lucide-react';
 import { toast } from 'sonner';
 import vendorApi from '@/lib/api/vendor';
 import { useVendorStore } from '@/store/vendor.store';
+import { canAccessVendorModule } from '@/lib/vendor-permissions';
 
 interface DashboardData {
   totalOrders: number;
@@ -23,16 +24,30 @@ export default function VendorDashboardPage() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
 
+  const fetchDashboard = useCallback(async () => {
+    const response = await vendorApi.get('/vendor/dashboard');
+    return response.data.data as DashboardData;
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetchDashboard()
+      .then((result) => { if (active) setData(result); })
+      .catch(() => { if (active) toast.error('Could not load dashboard'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [fetchDashboard]);
+
   const load = async () => {
     setLoading(true);
     try {
-      const res = await vendorApi.get('/vendor/dashboard');
-      setData(res.data.data);
-    } catch { toast.error('Could not load dashboard'); }
-    finally { setLoading(false); }
+      setData(await fetchDashboard());
+    } catch {
+      toast.error('Could not load dashboard');
+    } finally {
+      setLoading(false);
+    }
   };
-
-  useEffect(() => { load(); }, []);
 
   const stats = data ? [
     { label: 'Total Orders', value: data.totalOrders, icon: ShoppingBag, color: 'bg-blue-50 text-blue-600' },
@@ -50,7 +65,7 @@ export default function VendorDashboardPage() {
           <h1 className="text-2xl font-bold text-slate-800">Dashboard</h1>
           <p className="mt-0.5 text-sm text-slate-500">Welcome back, {vendor?.fName}</p>
         </div>
-        <button onClick={load} className="rounded-xl border p-2 text-slate-500 hover:text-emerald-600">
+        <button onClick={() => { setLoading(true); void load(); }} className="rounded-xl border p-2 text-slate-500 hover:text-emerald-600">
           <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
         </button>
       </div>
@@ -80,10 +95,10 @@ export default function VendorDashboardPage() {
           <h2 className="mb-4 font-semibold text-slate-800">Quick Actions</h2>
           <div className="space-y-2">
             {[
-              { href: '/vendor/items', label: 'Manage Products', desc: 'Add, edit or update stock' },
-              { href: '/vendor/orders', label: 'View Orders', desc: 'Process pending orders' },
-              { href: '/vendor/stores', label: 'Store Settings', desc: 'Update store profile' },
-            ].map(({ href, label, desc }) => (
+              { href: '/vendor/items', module: 'item', label: 'Manage Products', desc: 'Add, edit or update stock' },
+              { href: '/vendor/orders', module: 'order', label: 'View Orders', desc: 'Process pending orders' },
+              { href: '/vendor/stores', module: 'my_shop', label: 'Store Settings', desc: 'Update store profile' },
+            ].filter(({ module: permissionKey }) => canAccessVendorModule(vendor, permissionKey)).map(({ href, label, desc }) => (
               <a key={href} href={href}
                 className="flex items-center justify-between rounded-xl border p-3 hover:border-emerald-300 hover:bg-emerald-50">
                 <div>

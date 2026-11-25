@@ -10,6 +10,7 @@ const flashSales = require('../../../domains/store/flash-sales.controller');
 const campaigns = require('../../../domains/store/campaigns.controller');
 const advertisements = require('../../../domains/store/advertisements.controller');
 const notifications = require('../../../domains/identity/notifications.controller');
+const notifExt = require('../../../domains/identity/notification-extended.controller');
 const wallet = require('../../../domains/identity/wallet.controller');
 const profile = require('../../../domains/identity/customer-profile.controller');
 const otp = require('../../../domains/identity/customer-otp.controller');
@@ -110,5 +111,10 @@ router.post('/customer/loyalty-point/point-transfer', customerAuth, loyalty.poin
 router.get('/customer/notifications', customerAuth, notifications.getCustomerNotifications);
 router.put('/customer/notifications/read-all', customerAuth, notifications.markAllRead);
 router.put('/customer/notifications/:id/read', customerAuth, notifications.markRead);
+
+// Chat (customer ↔ admin)
+router.get('/customer/conversations', customerAuth, notifExt.customerGetConversations);
+router.get('/customer/conversations/:id/messages', customerAuth, notifExt.customerGetMessages);
+router.post('/customer/conversations/send', customerAuth, notifExt.customerSendMessage);
 
 module.exports = router;

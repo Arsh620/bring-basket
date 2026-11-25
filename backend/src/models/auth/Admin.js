@@ -8,7 +8,9 @@ const adminSchema = new mongoose.Schema({
   email:         { type: String, required: true, unique: true, lowercase: true, trim: true },
   image:         { type: String },
   password:      { type: String, required: true, select: false },
-  roleId:        { type: mongoose.Schema.Types.ObjectId, ref: 'AdminRole', required: true },
+  // Laravel-era admins can still store numeric/string AdminRole legacy IDs.
+  // New employee records use ObjectIds, so keep both representations readable.
+  roleId:        { type: mongoose.Schema.Types.Mixed, required: true },
   zoneId:        { type: mongoose.Schema.Types.ObjectId, ref: 'Zone' },
   isLoggedIn:    { type: Boolean, default: true },
   status:        { type: Boolean, default: true },

@@ -3,6 +3,7 @@ const mongoose = require('mongoose');
 const storeStockMovementSchema = new mongoose.Schema({
   storeId: { type: mongoose.Schema.Types.ObjectId, ref: 'Store', required: true },
   itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
+  variant: { type: String, default: '' },
   qtyChange: { type: Number, required: true },
   balanceAfter: { type: Number },
   type: { type: String, required: true, maxlength: 40 },

@@ -6,7 +6,19 @@ interface Admin {
   lName: string;
   email: string;
   image?: string;
-  roleId: { _id: string; name: string } | string;
+  status?: boolean;
+  zoneId?: string | null;
+  roleId: {
+    _id: string;
+    name: string;
+    legacyId?: number;
+    modules?: string[] | string;
+    status?: boolean;
+  } | string;
+}
+
+export function getWorkspaceLoginPath() {
+  return localStorage.getItem('admin_account_type') === 'employee' ? '/admin/employee-login' : '/master/login';
 }
 
 interface AuthState {
@@ -26,11 +38,18 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   hydrate: () => {
     const token = localStorage.getItem('admin_token');
-    set({ token, hasHydrated: true });
+    set((state) => ({
+      token,
+      admin: token === state.token ? state.admin : null,
+      hasHydrated: true,
+    }));
   },
 
   setAuth: (token, admin) => {
     localStorage.setItem('admin_token', token);
+    if (admin.roleId && typeof admin.roleId === 'object') {
+      localStorage.setItem('admin_account_type', Number(admin.roleId.legacyId) === 1 ? 'admin' : 'employee');
+    }
     set({ token, admin, hasHydrated: true });
   },
 

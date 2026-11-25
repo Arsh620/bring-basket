@@ -1,729 +1,570 @@
 # Bring Basket — Master System Design
-**Last updated:** 2025-07-10 (full audit)
+**Last updated:** 2026-11-18 (Laravel role-gate reconciliation)
 
 ---
 
-## Architecture
-
-Single Express monolith (`backend/`) + Next.js frontend (`frontend/`).
-Microservice extraction deferred — build features first.
+## Architecture — Microservices
 
 ```
-Internet → API Gateway (port 3000) → Backend monolith (port 5000)
-                                   → Frontend Next.js (port 3001)
+Internet
+  → API Gateway (port 3000)  ← all client traffic
+      → Identity service (port 5001)   ← auth, admin roles, vendor employee roles/accounts
+      → Catalog service (port 5002)
+      → Store service (port 5003)
+      → Inventory service (port 5004)
+      → Procurement service (port 5005) ← purchases + supplier portal operations
+      → Order service (port 5006)
+      → Accounting service (port 5007)
+      → Notification service (port 5008)
+      → Payment service (port 5010)
+      → Backend monolith (port 5000)   ← temporary legacy routes during extraction
+  → Frontend Next.js (port 3001)
+
 MongoDB (27017) · Redis (6379)
 ```
 
 ---
 
-## Auth System — How Every Portal Logs In
+## Portals — Complete List (Laravel-aligned)
 
-### JWT Strategy
-- Single `JWT_SECRET` shared across all portals
-- Token payload: `{ id, role }` — role determines which routes are accessible
-- Token expiry: 7 days (configurable via `JWT_EXPIRES_IN`)
-- No refresh tokens yet
-
-### Portal Login Summary
-
-| Portal | Login Route | Credential | JWT Role | Token Storage (FE) |
+| Portal | Login URL (Frontend) | Login API | Credential | JWT Role |
 |---|---|---|---|---|
-| Admin | `POST /api/v1/admin/auth/login` | email + password | `admin` | `localStorage.admin_token` |
-| Vendor | `POST /api/v1/vendor/auth/login` | email + password | `vendor` | `localStorage.vendor_token` (pending) |
-| Customer | `POST /api/v1/customer/auth/login` | email + password | `customer` | `localStorage.customer_token` |
-| Delivery Man | `POST /api/v1/deliveryman/auth/login` | phone + password | `deliveryman` | `localStorage.dm_token` |
-| Warehouse | `POST /api/v1/warehouse/auth/login` | username + password | `warehouse` | pending |
-| Supplier | `POST /api/v1/supplier/auth/login` | email + password | `supplier` | pending |
-| Vendor Employee | ❌ Not built yet | email + password | `vendor_employee` (planned) | pending |
-
-### Auth Middleware Chain
-```
-Request → auth.js (verify JWT + assert role) → controller
-```
-- `adminAuth` = verify + role === 'admin'
-- `vendorAuth` = verify + role === 'vendor'
-- `customerAuth` = verify + role === 'customer'
-- `deliverymanAuth` = verify + role === 'deliveryman'
-- `warehouseAuth` = verify + role === 'warehouse'
-- `supplierAuth` = verify + role === 'supplier'
+| Admin (Super) | `/admin/login` | `POST /api/v1/admin/auth/login` | email + password | `admin` |
+| Admin Employee | `/admin/employee-login` (same form) | same endpoint | email + password | `admin` (role_id checked) |
+| Vendor / Store | `/vendor/login` | `POST /api/v1/vendor/auth/login` | email + password | `vendor` |
+| Vendor Employee | `/vendor/login` (employee account type) | `POST /api/v1/vendor/auth/login` | email + password | `vendor_employee` |
+| Warehouse | `/warehouse/login` | `POST /api/v1/warehouse/auth/login` | username + password | `warehouse` |
+| Supplier | `/supplier/login` | `POST /api/v1/supplier/auth/login` | email + password | `supplier` |
+| Delivery Man | `/deliveryman/login` | `POST /api/v1/deliveryman/auth/login` | phone + password | `deliveryman` |
+| Customer | `/login` | `POST /api/v1/customer/auth/login` | email + password | `customer` |
 
 ---
 
-## Complete Route Map (Backend)
+## Role & Permission System (Laravel-aligned)
 
-### Identity Routes (`/api/v1/...`)
+### How it works
+- `AdminRole` model: `{ name, modules: JSON[], status }`
+- `modules` is a flat array of permission keys stored as JSON string in DB
+- `Admin.roleId` stores the selected `AdminRole._id`; login resolves it and returns the role and modules to the frontend
+- Master Admin (`legacyId: 1`) has `modules: null` → full access, no check
+- Admin employee management is guarded by `employee`; Admin and Vendor custom-role management use the distinct Laravel `custom_role` module
+- Role managers can only create/assign roles whose module grants are within their own active role; Master Admin can manage all modules
+- Employee managers only see/manage accounts with module grants no broader than their own; self-deactivation and self-deletion are blocked
+- Admin employee API requests → middleware checks the active role's `modules` array and zone scope
+- Frontend hides unavailable menu items, but every owning service must still enforce API permissions
+- Vendor employee roles use a separate permission catalog and are store-scoped
 
+### Create and verify an admin employee
+1. In **Admin roles**, create and activate a role, then select its module permissions.
+2. In **Administrators**, create an employee with a unique email, temporary password, and the active role. The employee record stores that role's MongoDB `_id` in `roleId`.
+3. Sign in at `/admin/employee-login` (same admin authentication API as `/admin/login`) with the employee email and password.
+4. Confirm the sidebar shows the selected modules. Try an allowed page and a page outside the role: the backend must allow the first and return `403` for the second.
+5. To verify a role change, sign out and back in so the frontend loads the updated role. API authorization reads the active role from MongoDB on each request.
+
+### Observed AdminRole Entries in Target MongoDB
+
+These target records were observed previously and are not a verified snapshot of the live Laravel database. The source Laravel role count and current module assignments remain unknown.
+
+| legacyId | Name | Modules |
+|---|---|---|
+| 1 | Master admin | null (full access) |
+| 2 | Inventory Management | collect_cash, item, notification, order, store, report, zone, pos, unit |
+| 3 | Product add | attribute, category, item, order, unit, purchase |
+| 4 | PO Creator | account, collect_cash, attribute, category, coupon, customer_management, provide_dm_earning, employee, item, order, store, report, withdraw_list, zone, pos, unit, warehouse, purchase |
+| 5 | Accountant | account, collect_cash, addon, attribute, banner, campaign, category, coupon, cashback, customer_management, deliveryman, provide_dm_earning, employee, item, notification, order, store, report, settings, withdraw_list, zone, module, parcel, pos, unit, subscription, warehouse, purchase |
+| 6 | Account | account, report, purchase, warehouse, collect_cash |
+| 7 | Franchise Team | same as Accountant |
+| 8 | Technical team | same as Accountant |
+| — | Super Admin | separate target entry; persistence/legacy ID not established in this audit |
+
+### Target Permission Catalog (36 keys)
+
+The Laravel routes use both `employee` and `custom_role`; runtime module records and source role assignments remain database-driven and are not established by this target catalog alone.
 ```
-POST   /admin/auth/login              ✅
-POST   /admin/auth/register           ✅
-GET    /admin/auth/me                 ✅
-POST   /admin/auth/logout             ✅
-GET    /admin/admins                  ✅
-POST   /admin/admins                  ✅
-GET    /admin/admins/:id              ✅
-PUT    /admin/admins/:id              ✅
-PATCH  /admin/admins/:id/status       ✅
-DELETE /admin/admins/:id              ✅
-GET    /admin/roles                   ✅
-POST   /admin/roles                   ✅
-GET    /admin/roles/:id               ✅
-PUT    /admin/roles/:id               ✅
-DELETE /admin/roles/:id               ✅
-
-POST   /customer/auth/login           ✅
-POST   /customer/auth/register        ✅
-GET    /customer/auth/me              ✅
-GET    /customer/addresses            ✅
-POST   /customer/addresses            ✅
-PUT    /customer/addresses/:id        ✅
-DELETE /customer/addresses            ✅
-
-POST   /vendor/auth/login             ✅
-GET    /vendor/auth/me                ✅
-POST   /vendor/auth/logout            ✅
-
-POST   /supplier/auth/login           ✅
-GET    /supplier/auth/me              ✅
-POST   /supplier/auth/logout          ✅
-
-POST   /deliveryman/auth/login        ✅
-GET    /deliveryman/auth/me           ✅
-POST   /deliveryman/auth/logout       ✅
-
-POST   /warehouse/auth/login          ✅
-GET    /warehouse/auth/me             ✅
-POST   /warehouse/auth/logout         ✅
-```
-
-### Customer Routes (`/api/v1/...`)
-
-```
-GET    /config                        ✅
-GET    /terms-and-conditions          ✅
-GET    /about-us                      ✅
-GET    /privacy-policy                ✅
-GET    /refund-policy                 ✅
-GET    /shipping-policy               ✅
-GET    /cancellation                  ✅
-GET    /zones                         ✅
-POST   /zones/check                   ✅
-
-GET    /items                         ✅
-GET    /items/latest                  ✅
-GET    /items/popular                 ✅
-GET    /items/discounted              ✅
-GET    /items/recommended             ✅
-GET    /items/most-reviewed           ✅
-GET    /items/search                  ✅
-GET    /items/search-suggestion       ✅
-GET    /items/:id                     ✅
-GET    /items/:id/reviews             ✅
-POST   /items/reviews/submit          ✅ (auth)
-
-GET    /categories                    ✅
-GET    /categories/popular            ✅
-GET    /categories/:id/children       ✅
-GET    /categories/:id/items          ✅
-
-GET    /stores                        ✅
-GET    /stores/latest                 ✅
-GET    /stores/popular                ✅
-GET    /stores/search                 ✅
-GET    /stores/:id                    ✅
-
-GET    /banners                       ✅
-GET    /banners/store/:storeId        ✅
-GET    /flash-sales                   ✅
-GET    /flash-sales/items             ✅
-GET    /campaigns/basic               ✅
-GET    /campaigns/item                ✅
-GET    /advertisements                ✅
-
-GET    /coupons                       ✅
-GET    /coupons/apply                 ✅ (auth)
-
-GET    /customer/info                 ✅ (auth)
-POST   /customer/update-profile       ✅ (auth)
-PUT    /customer/cm-firebase-token    ✅ (auth)
-DELETE /customer/remove-account       ✅ (auth)
-
-GET    /customer/wish-list            ✅ (auth)
-POST   /customer/wish-list/add        ✅ (auth)
-DELETE /customer/wish-list/remove     ✅ (auth)
-
-GET    /customer/wallet/balance       ✅ (auth)
-GET    /customer/wallet/transactions  ✅ (auth)
-
-GET    /customer/notifications        ✅ (auth)
-PUT    /customer/notifications/read-all ✅ (auth)
-PUT    /customer/notifications/:id/read ✅ (auth)
+account          collect_cash      addon             attribute
+banner           campaign          category          coupon
+cashback         customer_management  deliveryman    provide_dm_earning
+employee         custom_role       item              notification
+order
+store            report            settings          withdraw_list
+zone             module            parcel            pos
+unit             subscription      warehouse         purchase
+trip             promotion         vehicle           provider
+driver           download_app      rental_report
 ```
 
-### Cart & Order Routes (`/api/v1/customer/...`)
+---
+
+## Backend — Domain Structure
 
 ```
-POST   /cart/merge-guest              ✅
-GET    /cart/list                     ✅
-POST   /cart/add                      ✅
-POST   /cart/update                   ✅
-DELETE /cart/remove-item              ✅
-DELETE /cart/remove                   ✅
-
-GET    /order/list                    ✅
-GET    /order/running-orders          ✅
-GET    /order/details                 ✅
-POST   /order/place                   ✅
-PUT    /order/cancel                  ✅
+backend/src/
+  config/         db.js, logger.js, redis.js
+  domains/
+    catalog/      items, categories, brands, units, unit-groups, item-batches
+    identity/     admin-auth, admins, roles, customer-auth, customer-otp,
+                  customer-profile, customer-addresses, vendor-auth, vendor,
+                  vendors-admin, supplier-auth, deliveryman-auth, deliveryman,
+                  delivery-men-admin, dm-wallet, warehouse-auth, loyalty,
+                  notifications, wallet, wishlist
+    inventory/    warehouses, warehouse-stock, stock-movements, stock-transfers,
+                  store-stock-requests, batch-write-offs, order-stock-reservations,
+                  store-stock.service, store-item-stock.model
+    orders/       cart, order (place, list, cancel, admin)
+    procurement/  purchase-vendors, purchase-orders, purchase-bills,
+                  purchase-payments, purchase-returns
+    store/        stores, modules, zones, banners, campaigns, flash-sales,
+                  advertisements, coupons, cashback, wallet-bonus, config,
+                  customer-stores, razorpay
+  middleware/     auth.js, roleCheck.js, errorHandler.js, rateLimiter.js,
+                  sanitize.js, service-auth.js
+  models/
+    auth/         Admin, AdminRole, User, Vendor, DeliveryMan, OtpVerification,
+                  WalletTransaction, DMWalletTransaction, LoyaltyTransaction,
+                  Notification, CustomerAddress, VendorEmployee
+    catalog/      Item, Category, Brand, Unit, UnitGroup, UnitGroupConversion,
+                  ItemBatch, BatchWriteOff, Wishlist, Review, Tag, Allergy,
+                  Nutrition
+    purchase/     PurchaseVendor, PurchaseOrder, PurchaseBill, PurchasePayment,
+                  PurchaseReturn, Sequence
+    store/        Store, Module, Zone, Banner, Campaign, FlashSale,
+                  Advertisement, Coupon, BusinessSetting, Cashback,
+                  CashbackHistory, WalletBonus, Payment, StoreStockMovement
+    warehouse/    Warehouse, WarehouseItemStock, WarehouseItemBatch,
+                  WarehouseStockMovement, WarehouseStockTransfer,
+                  StoreStockRequest, OrderStockReservation
+  utils/          AppError.js, response.js, pagination.js, geospatial.js
 ```
 
-### Delivery Man Routes (`/api/v1/deliveryman/...`)
+---
 
+## Complete API Route Map
+
+### Identity (`/api/v1/...`)
 ```
-GET    /profile                       ✅
-PUT    /update-profile                ✅
-POST   /update-active-status          ✅
-PUT    /update-fcm-token              ✅
-GET    /current-orders                ✅
-GET    /all-orders                    ✅
-GET    /order-delivery-history        ✅
-GET    /order                         ✅
-PUT    /accept-order                  ✅
-PUT    /update-order-status           ✅
-GET    /notifications                 ✅
-POST   /record-location               ✅
+POST   /admin/auth/login                    ✅
+POST   /admin/auth/register                 ✅
+GET    /admin/auth/me                       ✅
+POST   /admin/auth/logout                   ✅
+GET    /admin/admins                        ✅
+POST   /admin/admins                        ✅
+GET    /admin/admins/:id                    ✅
+PUT    /admin/admins/:id                    ✅
+PATCH  /admin/admins/:id/status             ✅
+DELETE /admin/admins/:id                    ✅
+GET    /admin/roles                         ✅ requires custom_role module
+GET    /admin/roles/permissions             ✅ requires custom_role module
+POST   /admin/roles                         ✅ requires custom_role module
+GET    /admin/roles/:id                     ✅ requires custom_role module
+PUT    /admin/roles/:id                     ✅ requires custom_role module
+DELETE /admin/roles/:id                     ✅ requires custom_role module
+
+POST   /customer/auth/login                 ✅
+POST   /customer/auth/register              ✅
+GET    /customer/auth/me                    ✅
+POST   /customer/auth/forgot-password       ✅
+POST   /customer/auth/verify-otp            ✅
+PUT    /customer/auth/reset-password        ✅
+GET    /customer/addresses                  ✅
+POST   /customer/addresses                  ✅
+PUT    /customer/addresses/:id              ✅
+DELETE /customer/addresses                  ✅
+
+POST   /vendor/auth/login                   ✅
+POST   /vendor/auth/register                ✅
+GET    /vendor/auth/me                      ✅
+POST   /vendor/auth/logout                  ✅
+GET    /vendor/roles/permissions            ✅ Identity service; custom_role
+GET/POST/PUT/DELETE /vendor/roles           ✅ Identity service; custom_role
+GET/POST/PUT/PATCH/DELETE /vendor/employees ✅ Identity service
+
+POST   /supplier/auth/login                 ✅
+POST   /supplier/auth/set-password          ✅
+POST   /supplier/auth/invitations/:supplierId ✅ Admin, purchase permission; one-time manual share
+GET    /supplier/auth/me                    ✅
+POST   /supplier/auth/logout                ✅
+GET    /supplier/registration/options       ✅ Public registration choices
+POST   /supplier/registration               ✅ Public multipart form; pending approval
+
+POST   /deliveryman/auth/login              ✅
+GET    /deliveryman/auth/me                 ✅
+POST   /deliveryman/auth/logout             ✅
+
+POST   /warehouse/auth/login                ✅
+GET    /warehouse/auth/me                   ✅
+POST   /warehouse/auth/logout               ✅
 ```
 
-### Vendor Routes (`/api/v1/vendor/...`)
-
+Supplier authentication is owned by Identity; supplier business APIs are owned by Procurement:
 ```
-GET    /profile                       ✅
-PUT    /update-profile                ✅
-GET    /dashboard                     ✅
-GET    /orders                        ✅
-PUT    /orders/update-status          ✅
-GET    /items                         ✅
-POST   /items                         ✅
-PUT    /items/:id                     ✅
-PATCH  /items/:id/status              ✅
-DELETE /items/:id                     ✅
-GET    /stores                        ✅
-PUT    /update-fcm-token              ✅
+GET    /supplier/dashboard                  ✅
+GET    /supplier/orders                     ✅
+GET    /supplier/orders/:id                 ✅
+GET    /supplier/invoices                   ✅
+GET    /supplier/invoices/:id               ✅
+POST   /supplier/invoices/:id/upload        ✅ Supplier-owned private invoice file
+GET    /supplier/invoices/:id/attachment    ✅ Supplier-owned private invoice download
+GET    /supplier/payments                   ✅
+GET    /supplier/profile                    ✅
 ```
 
-### Admin Routes (`/api/v1/admin/...`)
-
+### Admin Management (`/api/v1/admin/...`)
 ```
---- Catalog ---
-GET/POST       /brands                ✅
-PUT/PATCH/DEL  /brands/:id            ✅
-GET/POST       /categories            ✅
-GET/PUT/PATCH/DEL /categories/:id     ✅
-GET/POST       /items                 ✅
-GET/PUT/PATCH/DEL /items/:id          ✅
-GET            /items/low-stock       ✅
-PATCH          /items/:id/stock       ✅
-GET/POST       /units                 ✅
-GET/PUT/DEL    /units/:id             ✅
-GET/POST       /unit-groups           ✅
-GET/PUT/PATCH/DEL /unit-groups/:id    ✅
+GET    /customers                           ✅
+GET    /customers/:id                       ✅
+PATCH  /customers/:id/status                ✅
+POST   /customers/:id/wallet/add-fund       ✅
+POST   /customers/:id/loyalty/adjust        ✅
+GET    /customers/:id/orders                ✅
+
+GET    /vendors                             ✅
+GET    /vendors/:id                         ✅
+PATCH  /vendors/:id/status                  ✅
+DELETE /vendors/:id                         ✅
+GET    /vendors/:id/stores                  ✅
+
+GET    /delivery-men                        ✅
+POST   /delivery-men                        ✅
+GET    /delivery-men/:id                    ✅
+PUT    /delivery-men/:id                    ✅
+PATCH  /delivery-men/:id/status             ✅
+PATCH  /delivery-men/:id/application        ✅
+DELETE /delivery-men/:id                    ✅
+
+GET    /cashback                            ✅
+POST   /cashback                            ✅
+PUT    /cashback/:id                        ✅
+PATCH  /cashback/:id/status                 ✅
+DELETE /cashback/:id                        ✅
+
+GET    /wallet-bonus                        ✅
+POST   /wallet-bonus                        ✅
+PUT    /wallet-bonus/:id                    ✅
+PATCH  /wallet-bonus/:id/status             ✅
+DELETE /wallet-bonus/:id                    ✅
+
+POST   /notifications/broadcast             ✅
+GET    /settings                            ✅
+POST   /settings                            ✅
+POST   /settings/bulk                       ✅
+```
+
+### Catalog (`/api/v1/...`)
+```
+GET/POST       /brands                      ✅
+PUT/PATCH/DEL  /brands/:id                  ✅
+GET/POST       /categories                  ✅
+GET/PUT/PATCH/DEL /categories/:id           ✅
+GET/POST       /items                       ✅
+GET/PUT/PATCH/DEL /items/:id                ✅
+GET            /items/low-stock             ✅
+PATCH          /items/:id/stock             ✅
+GET/POST       /units                       ✅
+GET/PUT/DEL    /units/:id                   ✅
+GET/POST       /unit-groups                 ✅
+GET/PUT/PATCH/DEL /unit-groups/:id          ✅
 GET/POST/PUT/DEL /unit-groups/:id/conversions ✅
-GET/POST       /item-batches          ✅
-GET/PUT/DEL    /item-batches/:id      ✅
-GET            /item-batches/expiring-soon ✅
+GET/POST       /item-batches               ✅
+GET/PUT/DEL    /item-batches/:id            ✅
+GET            /item-batches/expiring-soon  ✅
+```
 
---- Stores ---
-GET/POST       /modules               ✅
-GET/PUT/PATCH/DEL /modules/:id        ✅
-GET/POST       /zones                 ✅
-GET/PUT/PATCH/DEL /zones/:id          ✅
-GET/POST       /stores                ✅
-GET/PUT/PATCH/DEL /stores/:id         ✅
-GET/PUT        /stores/:id/schedule   ✅
+### Store (`/api/v1/admin/...`)
+```
+GET/POST       /modules                     ✅
+GET/PUT/PATCH/DEL /modules/:id              ✅
+GET/POST       /zones                       ✅
+GET/PUT/PATCH/DEL /zones/:id                ✅
+GET/POST       /stores                      ✅
+GET/PUT/PATCH/DEL /stores/:id               ✅
+GET/PUT        /stores/:id/schedule         ✅
+GET/POST       /banners                     ✅
+PUT/PATCH/DEL  /banners/:id                 ✅
+GET/POST       /coupons                     ✅
+PUT/PATCH/DEL  /coupons/:id                 ✅
+GET/POST       /flash-sales                 ✅
+GET/PUT/PATCH/DEL /flash-sales/:id          ✅
+GET/POST       /campaigns                   ✅
+PUT/PATCH/DEL  /campaigns/:id               ✅
+GET/POST       /advertisements              ✅
+PUT/PATCH/DEL  /advertisements/:id          ✅
+```
 
---- Inventory ---
-GET/POST       /warehouses            ✅
-GET/PUT/PATCH/DEL /warehouses/:id     ✅
-GET/PUT/PATCH  /warehouses/:id/stock  ✅
-GET            /stock-movements       ✅
-GET/POST       /stock-transfers       ✅
-GET/PATCH      /stock-transfers/:id   ✅
-GET/POST       /store-stock-requests  ✅
-GET/PATCH      /store-stock-requests/:id ✅
-GET/POST       /batch-write-offs      ✅
+### Inventory (`/api/v1/...`)
+```
+GET/POST       /warehouses                  ✅
+GET/PUT/PATCH/DEL /warehouses/:id           ✅
+GET/PUT/PATCH  /warehouses/:id/stock        ✅
+GET            /stock-movements             ✅
+GET/POST       /stock-transfers             ✅
+GET/PATCH      /stock-transfers/:id/dispatch ✅
+GET/PATCH      /stock-transfers/:id/receive  ✅
+GET/PATCH      /stock-transfers/:id/reject   ✅
+GET/POST       /store-stock-requests        ✅
+PATCH          /store-stock-requests/:id/approve ✅
+PATCH          /store-stock-requests/:id/dispatch ✅
+PATCH          /store-stock-requests/:id/receive  ✅
+PATCH          /store-stock-requests/:id/reject   ✅
+GET/POST       /batch-write-offs            ✅
+```
 
---- Procurement ---
-GET/POST       /purchases/vendors     ✅
-GET/PUT/PATCH/DEL /purchases/vendors/:id ✅
-GET/POST       /purchases/orders      ✅
-GET/PUT        /purchases/orders/:id  ✅
-POST           /purchases/orders/:id/issue ✅
-POST           /purchases/orders/:id/cancel ✅
-POST           /purchases/orders/:id/convert-to-bill ✅
-GET/PUT        /purchases/bills       ✅
-GET            /purchases/bills/:id   ✅
-POST           /purchases/bills/:id/void ✅
-GET            /purchases/bills/:id/grn-invoice ✅
-POST           /purchases/bills/:id/mark-stock-received ✅
-GET/POST       /purchases/payments    ✅
-DELETE         /purchases/payments/:id ✅
-GET/POST       /purchases/returns     ✅
-GET            /purchases/returns/:id ✅
-POST           /purchases/returns/:id/approve ✅
-POST           /purchases/returns/:id/void ✅
+### Procurement (`/api/v1/admin/purchases/...`)
+```
+GET/POST       /vendors                     ✅
+GET/PUT/DEL    /vendors/:id                 ✅
+GET/POST       /orders                      ✅
+GET/PUT        /orders/:id                  ✅
+POST           /orders/:id/issue            ✅
+POST           /orders/:id/cancel           ✅
+POST           /orders/:id/convert-to-bill  ✅
+GET/POST       /bills                       ✅
+GET            /bills/:id                   ✅
+POST           /bills/:id/void              ✅
+POST           /bills/:id/mark-stock-received ✅
+GET/POST       /payments                    ✅
+DELETE         /payments/:id                ✅
+GET/POST       /returns                     ✅
+GET            /returns/:id                 ✅
+POST           /returns/:id/approve         ✅
+POST           /returns/:id/void            ✅
+```
 
---- Orders ---
-GET            /orders                ✅
-GET            /orders/:id            ✅
+### Orders (`/api/v1/...`)
+```
+GET    /admin/orders                        ✅
+GET    /admin/orders/:id                    ✅
+GET    /customer/order/list                 ✅
+GET    /customer/order/running-orders       ✅
+GET    /customer/order/details              ✅
+POST   /customer/order/place                ✅
+PUT    /customer/order/cancel               ✅
+```
 
---- Marketing ---
-GET/POST       /banners               ✅
-PUT/PATCH/DEL  /banners/:id           ✅
-GET/POST       /coupons               ✅
-PUT/PATCH/DEL  /coupons/:id           ✅
-GET/POST       /flash-sales           ✅
-GET/PUT/PATCH/DEL /flash-sales/:id    ✅
-GET/POST       /campaigns             ✅
-PUT/PATCH/DEL  /campaigns/:id         ✅
-GET/POST       /advertisements        ✅
-PUT/PATCH/DEL  /advertisements/:id    ✅
+### Payment (`/api/v1/payment/...`)
+```
+POST   /razorpay/create-order               ✅
+POST   /razorpay/verify                     ✅
+POST   /razorpay/webhook                    ✅
+POST   /razorpay/refund                     ✅
+GET    /razorpay/history                    ✅
+```
 
---- Settings ---
-GET            /settings              ✅
-POST           /settings              ✅
-POST           /settings/bulk         ✅
+### Customer APIs (`/api/v1/customer/...`)
+```
+GET    /config                              ✅
+GET    /items, /items/:id, /items/search    ✅
+GET    /categories, /stores, /banners       ✅
+GET    /flash-sales, /campaigns             ✅
+GET    /coupons, /coupons/apply             ✅
+GET    /customer/info                       ✅
+POST   /customer/update-profile             ✅
+GET    /customer/wish-list                  ✅
+POST   /customer/wish-list/add              ✅
+DELETE /customer/wish-list/remove           ✅
+GET    /customer/wallet/balance             ✅
+GET    /customer/wallet/transactions        ✅
+POST   /customer/wallet/add-fund            ✅
+GET    /customer/wallet/bonuses             ✅
+GET    /customer/loyalty-point/transactions ✅
+POST   /customer/loyalty-point/point-transfer ✅
+GET    /customer/notifications              ✅
+PUT    /customer/notifications/read-all     ✅
+PUT    /customer/notifications/:id/read     ✅
+GET    /cart/list                           ✅
+POST   /cart/add                            ✅
+POST   /cart/update                         ✅
+DELETE /cart/remove-item                    ✅
+```
 
---- Notifications ---
-POST           /notifications/broadcast ✅
+### Vendor APIs (`/api/v1/vendor/...`)
+Vendor employee role/account management is routed to Identity. The following vendor business endpoints remain on the temporary backend monolith until their owning domain APIs are extracted:
+```
+GET    /profile                             ✅
+PUT    /update-profile                      ✅
+GET    /dashboard                           ✅
+GET    /stores                              ✅
+GET    /orders                              ✅
+PUT    /orders/update-status                ✅
+GET    /items                               ✅
+POST   /items                               ✅
+PUT    /items/:id                           ✅
+PATCH  /items/:id/status                    ✅
+DELETE /items/:id                           ✅
+```
+
+### Delivery Man APIs (`/api/v1/deliveryman/...`)
+```
+GET    /profile                             ✅
+PUT    /update-profile                      ✅
+POST   /update-active-status                ✅
+GET    /current-orders                      ✅
+GET    /all-orders                          ✅
+PUT    /accept-order                        ✅
+PUT    /update-order-status                 ✅
+GET    /wallet/balance                      ✅
+GET    /wallet/transactions                 ✅
+GET    /earnings                            ✅
 ```
 
 ---
 
-## Frontend Pages — Current Status
+## Frontend Pages — Status
 
 ### Admin Panel (`/admin/...`)
-
 | Page | Status | Notes |
 |---|---|---|
-| `/admin/login` | ✅ Done | Polished UI, zod validation |
-| `/admin/dashboard` | ✅ Done | Stats, low-stock, quick links |
-| `/admin/catalog/items` | ✅ Done | ResourcePage component |
-| `/admin/catalog/categories` | ✅ Done | |
-| `/admin/catalog/brands` | ✅ Done | |
-| `/admin/catalog/units` | ✅ Done | |
-| `/admin/catalog/unit-groups` | ✅ Done | |
-| `/admin/catalog/item-batches` | ✅ Done | |
-| `/admin/stores` | ✅ Done | |
-| `/admin/modules` | ✅ Done | |
-| `/admin/zones` | ✅ Done | |
-| `/admin/warehouse` | ✅ Done | |
-| `/admin/inventory/warehouse-stock` | ✅ Done | |
-| `/admin/inventory/stock-transfers` | ✅ Done | |
-| `/admin/inventory/store-stock-requests` | ✅ Done | |
-| `/admin/inventory/stock-movements` | ✅ Done | |
-| `/admin/inventory/batch-write-offs` | ✅ Done | |
-| `/admin/procurement/vendors` | ✅ Done | |
-| `/admin/procurement/orders` | ✅ Done | |
-| `/admin/procurement/bills` | ✅ Done | GRN, invoice upload |
-| `/admin/procurement/payments` | ✅ Done | |
-| `/admin/procurement/returns` | ✅ Done | |
-| `/admin/orders` | ✅ Done | All statuses via filter route |
-| `/admin/banners` | ✅ Done | |
-| `/admin/flash-sales` | ✅ Done | |
-| `/admin/campaigns` | ✅ Done | |
-| `/admin/advertisements` | ✅ Done | |
-| `/admin/coupons` | ✅ Done | |
-| `/admin/admins` | ✅ Done | |
-| `/admin/roles` | ✅ Done | |
-| `/admin/settings` | ✅ Done | App info + legal pages |
-| `/admin/customers` | ✅ Done | List + status toggle |
-| `/admin/vendors` | ✅ Done | List + status toggle |
-| `/admin/delivery-men` | ✅ Done | List + create + status |
-| `/admin/cashback` | ✅ Done | CRUD cashback rules |
-| `/admin/wallet-bonus` | ✅ Done | CRUD wallet bonus |
-| `/admin/employees` | ❌ Missing | |
-| `/admin/loyalty-points` | ❌ Missing | |
-| `/admin/disbursements` | ❌ Missing | |
-| `/admin/subscription-packages` | ❌ Missing | |
-| `/admin/reports/*` | ❌ Missing | |
-| `/admin/activity-logs` | ❌ Missing | |
+| `/admin/login` | ✅ | Polished UI, zod validation |
+| `/admin/dashboard` | ✅ | Stats, low-stock, quick links |
+| `/admin/catalog/items` | ✅ | ResourcePage |
+| `/admin/catalog/categories` | ✅ | |
+| `/admin/catalog/brands` | ✅ | |
+| `/admin/catalog/units` | ✅ | |
+| `/admin/catalog/unit-groups` | ✅ | With conversions dialog |
+| `/admin/catalog/item-batches` | ✅ | |
+| `/admin/stores` | ✅ | With schedule dialog |
+| `/admin/modules` | ✅ | |
+| `/admin/zones` | ✅ | |
+| `/admin/warehouse` | ✅ | |
+| `/admin/inventory/warehouse-stock` | ✅ | |
+| `/admin/inventory/stock-transfers` | ✅ | |
+| `/admin/inventory/store-stock-requests` | ✅ | |
+| `/admin/inventory/stock-movements` | ✅ | |
+| `/admin/inventory/batch-write-offs` | ✅ | |
+| `/admin/procurement/vendors` | ✅ | |
+| `/admin/procurement/orders` | ✅ | |
+| `/admin/procurement/bills` | ✅ | |
+| `/admin/procurement/payments` | ✅ | |
+| `/admin/procurement/returns` | ✅ | |
+| `/admin/orders` | ✅ | All statuses |
+| `/admin/banners` | ✅ | |
+| `/admin/flash-sales` | ✅ | |
+| `/admin/campaigns` | ✅ | |
+| `/admin/advertisements` | ✅ | |
+| `/admin/coupons` | ✅ | |
+| `/admin/admins` | ✅ | Role select dropdown |
+| `/admin/roles` | ✅ | Multi-select permissions |
+| `/admin/settings` | ✅ | |
+| `/admin/customers` | ✅ | List + status toggle |
+| `/admin/vendors` | ✅ | List + status toggle |
+| `/admin/delivery-men` | ✅ | List + create + status |
+| `/admin/cashback` | ✅ | CRUD |
+| `/admin/wallet-bonus` | ✅ | CRUD |
+| `/admin/loyalty-points` | ❌ | Config page missing |
+| `/admin/disbursements` | ❌ | Missing |
+| `/admin/subscription-packages` | ❌ | Missing |
+| `/admin/reports/*` | ❌ | All report pages missing |
+| `/admin/activity-logs` | ❌ | Missing |
+| `/admin/pos` | ❌ | POS system missing |
 
-### Customer Portal (`/...`)
-
-| Page | Status | Notes |
-|---|---|---|
-| `/home` | ✅ Done | Banners, categories, stores, items, search |
-| `/shop` | ✅ Done | Store select, items, cart, checkout, orders |
-| `/login` | ✅ Done | OTP forgot password flow |
-| `/register` | ✅ Done | |
-| `/profile` | ✅ Done | Edit + stats + quick links |
-| `/wishlist` | ✅ Done | List + remove + add-to-cart |
-| `/wallet` | ✅ Done | Balance + txns + add fund |
-| `/orders` | ✅ Done | List + cancel + details |
-| `/loyalty` | ✅ Done | History + convert to wallet |
-| `/notifications` | ✅ Done | Mark read/all |
-| `/addresses` | ❌ Missing | |
-
-### Delivery Man Portal (`/deliveryman/...`)
-
-| Page | Status | Notes |
-|---|---|---|
-| `/deliveryman/login` | ✅ Done | Phone + password |
-| `/deliveryman` | ✅ Done | Dashboard, orders, status update |
-| `/deliveryman/wallet` | ❌ Missing | |
-| `/deliveryman/profile` | ❌ Missing | |
-
-### Vendor Portal (`/vendor/...`)
-
-| Page | Status | Notes |
-|---|---|---|
-| `/vendor/login` | ✅ Done | |
-| `/vendor/register` | ✅ Done | |
-| `/vendor/dashboard` | ✅ Done | Stats + quick actions |
-| `/vendor/items` | ✅ Done | Full CRUD + status + search |
-| `/vendor/orders` | ✅ Done | List + filter + status update |
-| `/vendor/stores` | ✅ Done | View assigned stores |
-| `/vendor/pos` | ❌ Missing | Backend not built |
-| `/vendor/reports` | ❌ Missing | Backend not built |
-| `/vendor/employees` | ❌ Missing | Backend not built |
-| `/vendor/withdrawal` | ❌ Missing | Backend not built |
-
-### Warehouse Portal (`/warehouse/...`)
-
-| Page | Status | Notes |
-|---|---|---|
-| `/warehouse/login` | ❌ Missing | Backend ready |
-| `/warehouse/dashboard` | ❌ Missing | |
-| `/warehouse/stock` | ❌ Missing | |
-| `/warehouse/requests` | ❌ Missing | |
-
-### Supplier Portal (`/supplier/...`)
-
-| Page | Status | Notes |
-|---|---|---|
-| `/supplier/login` | ❌ Missing | Backend ready |
-| `/supplier/dashboard` | ❌ Missing | |
-| `/supplier/orders` | ❌ Missing | |
-
----
-
-## What Each Portal Should Have (Feature Scope)
-
-### 🔵 Admin Panel
-**Purpose:** Full system control
-
-Core (done): Catalog, Inventory, Procurement, Orders, Stores, Marketing, Roles, Settings
-
-Missing:
-- Customer management (list, block, wallet bonus, loyalty adjust)
-- Vendor management (list, approve/block, view stores)
-- Delivery Man management (list, approve/block, assign zone)
-- Employee management (vendor employees)
-- Loyalty Points config (earn rate, redeem rate)
-- Cashback config (rules, history)
-- Disbursement management (vendor + DM payouts)
-- Subscription packages (vendor plans)
-- Reports (GST, Brand, Expiry, Sales, Ledger, Payables)
-- Activity logs
-- Language & Translation
-- SMS/Email/Firebase config
-- Offline payment methods
-- File Manager
-
----
-
-### 🟢 Vendor Portal
-**Purpose:** Store owner manages their store(s)
-
-Must have:
-- Login / Register
-- Dashboard (orders summary, earnings, store stats)
-- Item management (CRUD, stock update, status)
-- Order management (accept, process, cancel)
-- Store profile (edit name, logo, schedule, settings)
-- Coupon management (create/edit own coupons)
-- Banner management (own store banners)
-- Reports (sales, item-wise, date-wise)
-- Withdrawal request (request payout)
-- Subscription (view/renew plan)
-- Employee management (add/remove store employees)
-- Delivery Man management (assign DM to store)
-
-Nice to have (later):
-- POS system
-- Chat/Conversation
-- Advertisement management
-
----
-
-### 🟡 Customer Portal
-**Purpose:** End customer shops and tracks orders
-
-Must have:
-- Login / Register (dedicated pages)
-- Home (banners, categories, stores, popular items)
-- Shop (browse items, add to cart)
-- Cart & Checkout
-- Order history & tracking
-- Profile (edit name, photo, phone)
-- Addresses (add/edit/delete)
-- Wallet (balance, transactions)
-- Wishlist
-- Notifications
-- Reviews (submit after delivery)
-
-Nice to have (later):
-- Loyalty Points page
-- Membership/Subscription
-- Referral code
-- Social login (Google/Facebook)
-- OTP-based password reset
-
----
-
-### 🔴 Delivery Man Portal
-**Purpose:** DM picks up and delivers orders
-
-Must have:
-- Login (phone + password)
-- Dashboard (online/offline toggle, stats)
-- Current orders (accept, update status)
-- Order history
-- Profile edit
-- Wallet & Earnings (balance, per-order earnings)
-- Notifications
-
-Nice to have (later):
-- Disbursement/Withdrawal request
-- Vehicle management
-- DM Reviews (view ratings received)
-- Chat with customer/store
-
----
-
-### 🟣 Warehouse Portal
-**Purpose:** Warehouse staff manages stock
-
-Must have:
-- Login (username + password)
-- Dashboard (stock summary)
-- Stock management (view, adjust)
-- Store stock requests (approve, dispatch)
-- Stock transfers (create, dispatch, receive)
-- Stock movements (audit log)
-- Pincode mapping
-
-Nice to have (later):
-- Purchase management (PO, Bills, GRN)
-- Sub-warehouse management
-- Reports
-
----
-
-### ⚫ Supplier Portal
-**Purpose:** Purchase vendor views their POs and submits invoices
-
-Must have:
-- Login (email + password, invite-based)
-- Dashboard (pending POs, recent bills)
-- Purchase Orders (view issued POs)
-- Purchase Bills (view, upload invoice)
-- Profile (view own details)
-
----
-
-## Backend — What's Missing
-
-### High Priority
-| Feature | Where |
-|---|---|
-| Loyalty Points earn/redeem API | identity domain |
-| Cashback rules + apply on order | store/orders domain |
-| Admin: Customer management CRUD | identity domain |
-| Admin: Vendor management CRUD | identity domain |
-| Admin: DM management CRUD | identity domain |
-| Vendor Employee auth + CRUD | identity domain |
-| Employee Role CRUD | identity domain |
-| DM Wallet & Earnings | identity domain |
-| Payment Gateways (Razorpay first) | new payment domain |
-
-### Medium Priority
-| Feature | Where |
-|---|---|
-| Admin: Disbursement management | new accounting domain |
-| Admin: Subscription packages CRUD | store domain |
-| Vendor: POS system | vendor domain |
-| Vendor: Reports | vendor domain |
-| Vendor: Withdrawal requests | identity domain |
-| DM: Disbursement/Withdrawal | identity domain |
-| Warehouse Portal APIs | inventory domain |
-| Supplier Portal APIs | procurement domain |
-| Reviews admin management | catalog domain |
-
-### Low Priority
-| Feature | Where |
-|---|---|
-| Activity Logs | new logging domain |
-| Language & Translation | new settings domain |
-| SMS/Email/Firebase config | new settings domain |
-| Newsletter | identity domain |
-| Parcel delivery order type | orders domain |
-| Membership/Subscription plans | identity domain |
-| Chat/Conversation | new chat domain |
-| PDF generation (invoices) | utils |
-| Excel export | utils |
-| WebSockets (real-time tracking) | new ws domain |
-
----
-
-## Phase Plan (Updated)
-
-### Phase 2 — Customer Portal Complete ✅ BACKEND DONE
-
-**Backend completed:**
-- OTP password reset (forgot → verify → reset)
-- Loyalty Points (transactions, point-transfer to wallet)
-- Cashback (rules, apply, admin CRUD)
-- Wallet add-fund + bonuses
-- Customer management admin APIs (list, view, status, wallet credit, loyalty adjust)
-- Vendor management admin APIs (list, view, status, stores)
-- Delivery Man management admin APIs (list, create, update, status, application approve/deny)
-- Wallet Bonus admin CRUD
-- Vendor register endpoint
-- Vendor portal routes (`/api/v1/vendor/...`)
-
-**New files created:**
-- `models/auth/OtpVerification.js`
-- `models/auth/LoyaltyTransaction.js`
-- `models/store/Cashback.js`
-- `models/store/CashbackHistory.js`
-- `models/store/WalletBonus.js`
-- `domains/identity/customer-otp.controller.js`
-- `domains/identity/loyalty.controller.js`
-- `domains/identity/customers.controller.js`
-- `domains/identity/vendors-admin.controller.js`
-- `domains/identity/delivery-men-admin.controller.js`
-- `domains/store/cashback.controller.js`
-- `domains/store/wallet-bonus.controller.js`
-- `routes/v1/vendor/index.js`
-
-**Frontend still pending for Phase 2**
-
-### Phase 2 Frontend — Customer Portal ✅ DONE
-**Frontend completed:**
-- `/login` + `/register` root pages
-- `/wishlist` page (list, remove, add-to-cart)
-- `(customer)/login` — login + OTP forgot password flow
-- `(customer)/register` — registration
-- `(customer)/profile` — edit profile + stats + quick links
-- `(customer)/wallet` — balance + transactions + add fund
-- `(customer)/loyalty` — history + convert to wallet
-- `(customer)/notifications` — mark read/all
-- `(customer)/orders` — list + cancel + expand details
-- Customer layout with bottom nav
-
-### Phase 3 — Admin Management ✅ DONE
-**Backend completed:** Customer/Vendor/DM management APIs, Cashback, Wallet Bonus
-**Frontend completed:**
-- `/admin/customers` — list, status toggle
-- `/admin/vendors` — list, status toggle
-- `/admin/delivery-men` — list, create, status toggle
-- `/admin/cashback` — CRUD cashback rules
-- `/admin/wallet-bonus` — CRUD wallet bonus
-- Sidebar: User management + Promotions groups added
-- `admin-resources.ts`: customers, vendors, delivery-men, cashback, wallet-bonus entries
-
-### Phase 4 — Vendor Portal ✅ DONE
-**Frontend completed:**
-- `/vendor/login` — email + password login
-- `/vendor/register` — vendor self-registration
-- `/vendor/dashboard` — stats + quick actions
-- `/vendor/items` — full CRUD + status toggle + search + pagination
-- `/vendor/orders` — list + filter by status + update status
-- `/vendor/stores` — view assigned stores
-- Vendor layout with sidebar (desktop) + bottom nav (mobile)
-- `vendor.store.ts` — Zustand auth store
-- `lib/api/vendor.ts` — Axios client with token
-
-### Phase 5 — Delivery Man Complete
-Backend: DM wallet, earnings, disbursement
-Frontend: DM wallet page, profile edit, earnings
-
-### Phase 6 — Warehouse & Supplier Portals
-Frontend: Warehouse portal (login, dashboard, stock, requests), Supplier portal
-
-### Phase 7 — Payment Gateways ✅ DONE
-**Backend completed:**
-- `models/store/Payment.js` — payment transaction model
-- `domains/store/razorpay.controller.js` — create order, verify, webhook, refund, history
-- `routes/v1/payment/index.js` — payment routes
-- Order service: `digital_payment` + `wallet` payment methods added
-- Wallet payment: balance check + debit in transaction
-- Webhook: signature verification + auto-fulfill
-- Gateway: `/api/v1/payment/*` routes added
-
-**Frontend completed:**
-- `lib/razorpay.ts` — script loader + openRazorpay utility
-- `components/payment/RazorpayButton.tsx` — reusable payment button
-- `(customer)/checkout/page.tsx` — full checkout (COD + Razorpay + Wallet)
-- `(customer)/wallet/page.tsx` — Razorpay top-up added
-
-**New API endpoints:**
-```
-POST /payment/razorpay/create-order   (customerAuth)
-POST /payment/razorpay/verify         (customerAuth)
-POST /payment/razorpay/webhook        (public, signature verified)
-POST /payment/razorpay/refund         (adminAuth)
-GET  /payment/razorpay/history        (customerAuth)
-```
-
-**Setup required:**
-- `.env`: Set `RAZORPAY_KEY_ID`, `RAZORPAY_KEY_SECRET`, `RAZORPAY_WEBHOOK_SECRET`
-- `.env.local`: Set `NEXT_PUBLIC_RAZORPAY_KEY_ID`
-- Razorpay Dashboard: Add webhook URL `https://yourdomain.com/api/v1/payment/razorpay/webhook`
-
-### Phase 8 — Delivery Man Complete + Customer Addresses
-Backend: DM wallet, earnings
-Frontend: DM wallet page, Customer addresses page
-
-### Phase 9 — Warehouse & Supplier Portals
-Frontend: Warehouse portal, Supplier portal
-
-### Phase 10 — Admin Reports & Config
-Backend: Reports, SMS/Email config, Activity logs
-Frontend: Reports pages
-
----
-
-## Vendor Portal Routes (`/vendor/...`)
-
+### Customer Portal
 | Page | Status |
 |---|---|
-| `/vendor/login` | ✅ Done |
-| `/vendor/register` | ✅ Done |
-| `/vendor/dashboard` | ✅ Done |
-| `/vendor/items` | ✅ Done |
-| `/vendor/orders` | ✅ Done |
-| `/vendor/stores` | ✅ Done |
-| `/vendor/employees` | ❌ Missing |
-| `/vendor/withdrawal` | ❌ Missing |
-| `/vendor/reports` | ❌ Missing |
+| `/login` | ✅ OTP forgot password |
+| `/register` | ✅ |
+| `/home` | ✅ |
+| `/shop` | ✅ |
+| `/checkout` | ✅ COD + Razorpay + Wallet |
+| `/profile` | ✅ |
+| `/orders` | ✅ |
+| `/wallet` | ✅ |
+| `/wishlist` | ✅ |
+| `/loyalty` | ✅ |
+| `/notifications` | ✅ |
+| `/addresses` | ❌ Missing |
 
-### Phase 5 — Delivery Man Complete
-Backend: DM wallet, earnings, disbursement
-Frontend: DM wallet page, profile edit, earnings
+### Vendor Portal
+| Page | Status |
+|---|---|
+| `/vendor/login` | ✅ |
+| `/vendor/register` | ✅ |
+| `/vendor/dashboard` | ✅ |
+| `/vendor/items` | ✅ |
+| `/vendor/orders` | ✅ |
+| `/vendor/stores` | ✅ |
+| `/vendor/employees` | ✅ |
+| `/vendor/roles` | ✅ |
+| `/vendor/withdrawal` | ❌ |
+| `/vendor/reports` | ❌ |
+| `/vendor/pos` | ❌ |
+| `/vendor/coupons` | ❌ |
+| `/vendor/banners` | ❌ |
 
-### Phase 6 — Payment Gateways
-Backend: Razorpay → Stripe → PhonePe → others
+### Delivery Man Portal
+| Page | Status |
+|---|---|
+| `/deliveryman/login` | ✅ |
+| `/deliveryman` (dashboard) | ✅ |
+| `/deliveryman/wallet` | ❌ |
+| `/deliveryman/profile` | ❌ |
 
-### Phase 7 — Warehouse & Supplier Portals
-Frontend: Warehouse portal, Supplier portal
+### Warehouse Portal
+| Page | Status |
+|---|---|
+| `/warehouse/login` | ✅ |
+| `/warehouse/dashboard` | ⚠️ Authenticated profile shell; operations UI pending |
+| `/warehouse/stock` | ❌ |
+| `/warehouse/requests` | ❌ |
+| `/warehouse/transfers` | ❌ |
 
-### Phase 8 — Admin Reports & Config
-Backend: Reports, SMS/Email config, Activity logs
-Frontend: Reports pages, config pages
+### Supplier Portal
+| Page | Status |
+|---|---|
+| `/supplier/login` | ✅ |
+| `/supplier/set-password#token` | ✅ Admin-generated one-time link; manual sharing (SMTP not configured) |
+| `/supplier/register` | ✅ Business/tax, billing/shipping, contact, bank, terms and document submission |
+| `/supplier/dashboard` | ✅ Open PO count, outstanding balance and last payment |
+| `/supplier/orders` | ✅ Order list and detail (supplier processing workflow pending) |
+| `/supplier/invoices` | ✅ Invoice list/detail and private supplier invoice upload/download |
+| `/supplier/payments` | ✅ Payment history |
+| `/supplier/profile` | ✅ Read-only registration profile |
 
-### Phase 9 — Advanced
-WebSockets, PDF, Excel, Multi-module, Parcel, POS
+---
+
+## What's Missing — Prioritized
+
+### P1 — Critical gaps
+| Feature | Backend | Frontend |
+|---|---|---|
+| Admin Employee login (separate URL `/admin/employee-login`) | ✅ same identity flow | ✅ shared admin login form |
+| Module-based sidebar and API permission checks | ✅ | ✅ |
+| Vendor Employee auth + CRUD | ✅ | ✅ |
+| Customer addresses page | ✅ API ready | ❌ |
+| DM wallet + earnings page | ✅ API ready | ❌ |
+| DM profile edit page | ✅ API ready | ❌ |
+| Warehouse portal (login + dashboard + stock) | ✅ API ready | ⚠️ Login/profile shell; operations UI pending |
+| Supplier portal core APIs (Identity + Procurement) | ✅ | ✅ Browse dashboard, orders, invoices, payments and profile |
+| Supplier password setup link (one-time, admin-generated) | ✅ | ✅ |
+| Supplier public registration | ✅ Procurement API and UI; uploads stored in procurement storage volume |
+| Supplier order quantity processing and challan upload | ❌ | ❌ |
+| Supplier product CSV workflow | ❌ | ❌ |
+
+### P2 — Important
+| Feature | Backend | Frontend |
+|---|---|---|
+| Admin: Loyalty points config | ❌ | ❌ |
+| Admin: Disbursement management | ❌ | ❌ |
+| Admin: Subscription packages CRUD | ❌ | ❌ |
+| Admin: Reports (sales, stock, GST, expiry) | ❌ | ❌ |
+| Admin: Activity logs | ❌ | ❌ |
+| Vendor: POS system | ❌ | ❌ |
+| Vendor: Employee management | ❌ | ❌ |
+| Vendor: Withdrawal requests | ❌ | ❌ |
+| Vendor: Coupons + Banners | ❌ | ❌ |
+| Vendor: Reports | ❌ | ❌ |
+
+### P3 — Nice to have
+| Feature | Notes |
+|---|---|
+| POS system (admin + vendor) | Complex, defer |
+| Chat / Conversation | WebSocket needed |
+| PDF invoice generation | mPDF equivalent |
+| Excel export | Maatwebsite equivalent |
+| Multi-language / Translation | i18n |
+| SMS / Email / Firebase config | Settings page |
+| Social login (Google/Facebook) | OAuth |
+| Parcel delivery order type | Separate module |
+| Membership / Subscription plans | Customer-facing |
+| Referral code system | Marketing |
 
 ---
 
@@ -741,8 +582,9 @@ WebSockets, PDF, Excel, Multi-module, Parcel, POS
 | API Client | TanStack Query + Axios |
 | UI | shadcn/ui |
 | Validation | Zod (frontend) |
+| Payments | Razorpay (done), others planned |
 
-## Service Ports
+## Service Ports (Docker)
 
 | Service | Port | Status |
 |---|---|---|
@@ -755,10 +597,13 @@ WebSockets, PDF, Excel, Multi-module, Parcel, POS
 ## Coding Rules
 
 1. Backend: `routes → controller → service → model` pattern
-2. Response format: `{ success, data, message }` always
+2. Response: `{ success, data, message }` always
 3. Pagination: `{ data, pagination: { total, page, limit, pages } }`
 4. No cross-domain populate — use HTTP calls between domains
 5. JWT verified at middleware, controllers trust `req.user`
-6. MongoDB transactions required for stock-changing operations
+6. MongoDB transactions for all stock-changing operations
 7. All monetary values stored as `Number` (not Decimal128)
-8. Frontend: TanStack Query for all API calls, Zustand for auth state
+8. Frontend: TanStack Query for API calls, Zustand for auth state
+9. Permission check: `role.modules` array contains module key → access granted
+10. Master admin (`legacyId: 1`) bypasses all module checks
+11. Legacy numeric `Admin.roleId` values are resolved through `AdminRole.legacyId` at runtime; no database rewrite is required

@@ -1,4 +1,5 @@
 const FORBIDDEN = /[$]/;
+const PASSWORD_FIELDS = new Set(['password', 'currentPassword', 'newPassword', 'oldPassword', 'passwordConfirmation', 'password_confirmation']);
 
 const sanitizeValue = (value) => {
   if (typeof value === 'string') return value.replace(FORBIDDEN, '');
@@ -11,7 +12,8 @@ const sanitizeObject = (obj) => {
   const result = {};
   for (const key of Object.keys(obj)) {
     const cleanKey = key.replace(FORBIDDEN, '');
-    result[cleanKey] = sanitizeValue(obj[key]);
+    const value = obj[key];
+    result[cleanKey] = PASSWORD_FIELDS.has(key) && typeof value === 'string' ? value : sanitizeValue(value);
   }
   return result;
 };

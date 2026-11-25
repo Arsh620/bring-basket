@@ -8,13 +8,9 @@ const isValidId = (id) => mongoose.isValidObjectId(id);
 // GET /stock-movements
 exports.getAll = async (req, res, next) => {
   try {
-    const { warehouseId, itemId, storeId, type, from, to, page, limit: lim } = req.query;
-    const filter = {};
-
-    if (warehouseId) {
-      if (!isValidId(warehouseId)) return error(res, 'Invalid warehouseId', 400);
-      filter.warehouseId = warehouseId;
-    }
+    const { warehouseId, itemId, storeId, type, from, to, page, limit: lim } = req.warehouseQuery ?? req.query;
+    if (!warehouseId || !isValidId(warehouseId)) return error(res, 'Invalid warehouseId', 400);
+    const filter = { warehouseId };
     if (itemId) {
       if (!isValidId(itemId)) return error(res, 'Invalid itemId', 400);
       filter.itemId = itemId;
@@ -36,7 +32,7 @@ exports.getAll = async (req, res, next) => {
         .populate('warehouseId', 'name code')
         .populate('itemId', 'name sku barcode')
         .populate('storeId', 'name')
-        .sort({ movedAt: -1 })
+        .sort({ movedAt: -1, _id: -1 })
         .skip(skip).limit(limit),
       WarehouseStockMovement.countDocuments(filter),
     ]);

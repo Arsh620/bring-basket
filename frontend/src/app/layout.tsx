@@ -9,13 +9,13 @@ const geistMono = Geist_Mono({ variable: '--font-geist-mono', subsets: ['latin']
 
 export const metadata: Metadata = {
   title: 'Bring Basket',
-  description: 'Bring Basket Admin Panel',
+  description: 'Bring Basket shopping and operations portals',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
-    <html lang="en">
-      <body className={`${geistSans.variable} ${geistMono.variable} antialiased`}>
+    <html lang="en" className={`${geistSans.variable} ${geistMono.variable}`}>
+      <body className="antialiased">
         <Providers>
           {children}
           <Toaster richColors position="top-right" />

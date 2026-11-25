@@ -8,11 +8,11 @@ WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY backend/src ./src
-COPY identity-service/index.js ./index.js
+COPY --from=deps --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --chown=appuser:appgroup backend/src ./src
+COPY --chown=appuser:appgroup identity-service/index.js ./index.js
 
-RUN mkdir -p logs && chown -R appuser:appgroup /app
+RUN mkdir -p logs && chown appuser:appgroup logs
 USER appuser
 
 EXPOSE 5001

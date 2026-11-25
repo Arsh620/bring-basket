@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { AxiosError } from 'axios';
-import { ArrowLeft, Check, LoaderCircle, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
+import { ArrowLeft, Check, Copy, KeyRound, LoaderCircle, Pencil, Plus, Search, Trash2, X } from 'lucide-react';
 import Link from 'next/link';
 
 import { AdminLayout } from '@/components/admin/layout/AdminLayout';
@@ -136,6 +136,7 @@ export function ProcurementVendorsPage() {
   const [page, setPage] = useState(1);
   const [editor, setEditor] = useState<Vendor | null | undefined>(undefined);
   const [busy, setBusy] = useState<string | null>(null);
+  const [setupLink, setSetupLink] = useState<{ vendorName: string; url: string; expiresAt: string } | null>(null);
 
   const query = useQuery({
     queryKey: ['procurement-vendors', page, search],
@@ -157,6 +158,33 @@ export function ProcurementVendorsPage() {
       toast.success(`Vendor ${approvalStatus}`);
     } catch (error) { toast.error(msg(error)); }
     finally { setBusy(null); }
+  };
+
+  const createPasswordSetupLink = async (vendor: Vendor) => {
+    setBusy(vendor._id);
+    try {
+      const response = await api.post(`/supplier/auth/invitations/${vendor._id}`);
+      const { setupPath, expiresAt } = response.data.data as { setupPath: string; expiresAt: string };
+      setSetupLink({
+        vendorName: vendor.displayName,
+        url: new URL(setupPath, window.location.origin).toString(),
+        expiresAt,
+      });
+    } catch (error) {
+      toast.error(msg(error));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const copyPasswordSetupLink = async () => {
+    if (!setupLink) return;
+    try {
+      await navigator.clipboard.writeText(setupLink.url);
+      toast.success('Password setup link copied');
+    } catch {
+      toast.error('Clipboard access failed. Select and copy the link manually.');
+    }
   };
 
   const remove = async (vendor: Vendor) => {
@@ -249,6 +277,11 @@ export function ProcurementVendorsPage() {
                               </Button>
                             </>
                           )}
+                          {vendor.email && (
+                            <Button size="sm" variant="outline" disabled={busy === vendor._id} onClick={() => createPasswordSetupLink(vendor)} className="rounded-lg">
+                              <KeyRound size={13} /> Set password
+                            </Button>
+                          )}
                           <Button size="sm" variant="outline" disabled={busy === vendor._id} onClick={() => setEditor(vendor)} className="rounded-lg">
                             <Pencil size={13} /> Edit
                           </Button>
@@ -275,6 +308,33 @@ export function ProcurementVendorsPage() {
         </Card>
       </div>
       {editor !== undefined && <VendorForm vendor={editor} onClose={() => setEditor(undefined)} />}
+      {setupLink && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-950/45 p-4 backdrop-blur-sm">
+          <section role="dialog" aria-modal="true" aria-labelledby="supplier-password-link-title" className="w-full max-w-xl rounded-2xl bg-white p-6 shadow-2xl">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h2 id="supplier-password-link-title" className="text-lg font-bold text-[#0b2346]">Supplier password setup</h2>
+                <p className="mt-1 text-sm text-gray-500">{setupLink.vendorName}</p>
+              </div>
+              <button type="button" aria-label="Close dialog" onClick={() => setSetupLink(null)} className="rounded-lg p-2 text-gray-500 hover:bg-gray-100">
+                <X size={18} />
+              </button>
+            </div>
+            <p className="mt-5 rounded-xl bg-amber-50 p-3 text-sm text-amber-900">
+              Email delivery is not configured here. Copy this one-time link and send it to the supplier securely. It expires at {new Date(setupLink.expiresAt).toLocaleString()}.
+            </p>
+            <label htmlFor="supplier-password-setup-link" className="mt-4 block text-sm font-medium text-gray-700">Setup link</label>
+            <input id="supplier-password-setup-link" readOnly value={setupLink.url} className="mt-1.5 w-full rounded-xl border border-gray-200 bg-gray-50 px-3 py-2.5 text-sm text-gray-700" />
+            <p className="mt-2 text-xs text-gray-500">The link can be used once. Generate a new link if it expires or is used.</p>
+            <div className="mt-5 flex justify-end gap-3">
+              <Button variant="outline" onClick={() => setSetupLink(null)}>Close</Button>
+              <Button onClick={copyPasswordSetupLink} className="bg-[#0b438d] text-white hover:bg-[#082f68]">
+                <Copy size={15} /> Copy link
+              </Button>
+            </div>
+          </section>
+        </div>
+      )}
     </AdminLayout>
   );
 }

@@ -7,10 +7,16 @@ async function seed() {
   await mongoose.connect(process.env.MONGO_URI);
   console.log('Connected to MongoDB');
 
-  // Create role
-  let role = await AdminRole.findOne({ name: 'Super Admin' });
+  // Reuse the Laravel primary role so the admin login portal can identify it.
+  let role = await AdminRole.findOne({ legacyId: 1 });
   if (!role) {
-    role = await AdminRole.create({ name: 'Super Admin', modules: '[]', status: true });
+    role = await AdminRole.findOne({ name: /^Super Admin$/i });
+    if (role) {
+      role.legacyId = 1;
+      await role.save();
+    } else {
+      role = await AdminRole.create({ legacyId: 1, name: 'Master admin', modules: '[]', status: true });
+    }
     console.log('Role created:', role._id);
   } else {
     console.log('Role already exists:', role._id);
@@ -30,6 +36,19 @@ async function seed() {
     });
     console.log('Admin created:', admin._id);
   } else {
+    let assignedRole = admin.roleId;
+    if (typeof assignedRole === 'number' || (typeof assignedRole === 'string' && /^\d+$/.test(assignedRole))) {
+      assignedRole = await AdminRole.findOne({ legacyId: Number(assignedRole) });
+    } else if (mongoose.isValidObjectId(assignedRole)) {
+      assignedRole = await AdminRole.findById(assignedRole);
+    } else {
+      assignedRole = null;
+    }
+    if (Number(assignedRole?.legacyId) !== 1) {
+      admin.roleId = role._id;
+      await admin.save();
+      console.log('Existing admin linked to primary role:', admin._id);
+    }
     console.log('Admin already exists:', admin._id);
   }
 

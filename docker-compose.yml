@@ -55,11 +55,26 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      STORE_SERVICE_URL: http://store:5003
+      INVENTORY_SERVICE_URL: http://inventory:5004
+      ORDER_SERVICE_URL: http://order:5006
+      ORDER_DATABASE: bring_basket_order
       ALLOWED_ORIGINS: "${ALLOWED_ORIGINS:-http://localhost:3001},http://localhost:3001,http://127.0.0.1:3001"
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+      FIREBASE_PROJECT_ID: ${FIREBASE_PROJECT_ID}
+      FIREBASE_CLIENT_EMAIL: ${FIREBASE_CLIENT_EMAIL}
+      FIREBASE_PRIVATE_KEY: ${FIREBASE_PRIVATE_KEY}
+      LOYALTY_EARN_RATE: ${LOYALTY_EARN_RATE:-1}
+      LOYALTY_REDEEM_RATE: ${LOYALTY_REDEEM_RATE:-10}
+      LOYALTY_MAX_REDEEM_PERCENT: ${LOYALTY_MAX_REDEEM_PERCENT:-20}
     depends_on:
       mongo:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      order:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -217,6 +232,8 @@ services:
       timeout: 5s
       retries: 5
       start_period: 30s
+    volumes:
+      - procurement_storage:/app/storage
     networks:
       - bb_network
 
@@ -235,9 +252,14 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
+      IDENTITY_SERVICE_URL: http://identity:5001
       CATALOG_SERVICE_URL: http://catalog:5002
       STORE_SERVICE_URL: http://store:5003
       INVENTORY_SERVICE_URL: http://inventory:5004
+      ORDER_OPERATIONS_DATABASE: bring_basket
+      LOYALTY_EARN_RATE: ${LOYALTY_EARN_RATE:-1}
+      LOYALTY_REDEEM_RATE: ${LOYALTY_REDEEM_RATE:-10}
+      LOYALTY_MAX_REDEEM_PERCENT: ${LOYALTY_MAX_REDEEM_PERCENT:-20}
     depends_on:
       mongo:
         condition: service_healthy
@@ -248,6 +270,8 @@ services:
       store:
         condition: service_healthy
       inventory:
+        condition: service_healthy
+      identity:
         condition: service_healthy
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5006/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -328,12 +352,13 @@ services:
       NODE_ENV: production
       PORT: 5010
       MONGO_URI: mongodb://mongo:27017/bring_basket?replicaSet=rs0
+      ORDER_DATABASE: bring_basket_order
       REDIS_URL: redis://redis:6379
       JWT_SECRET: ${JWT_SECRET}
       JWT_EXPIRES_IN: ${JWT_EXPIRES_IN:-7d}
-      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID}
-      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET}
-      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-rzp_test_placeholder}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-placeholder}
+      RAZORPAY_WEBHOOK_SECRET: ${RAZORPAY_WEBHOOK_SECRET:-placeholder}
     depends_on:
       mongo:
         condition: service_healthy
@@ -342,9 +367,9 @@ services:
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5010/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
       interval: 15s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     networks:
       - bb_network
 
@@ -429,6 +454,7 @@ volumes:
   mongo_data:
   redis_data:
   backend_storage:
+  procurement_storage:
   backend_logs:
 
 networks:

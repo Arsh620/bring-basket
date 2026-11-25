@@ -1,7 +1,9 @@
 const crypto = require('node:crypto');
+const mongoose = require('mongoose');
 const Razorpay = require('razorpay');
+const benefits = require('../orders/checkout-benefits.service');
 const Payment = require('../../models/store/Payment');
-const Order = require('../orders/order.model');
+const { orderModel } = require('../orders/order-data');
 const User = require('../../models/auth/User');
 const WalletTransaction = require('../../models/auth/WalletTransaction');
 const { success, error } = require('../../utils/response');
@@ -17,40 +19,116 @@ const getRazorpay = () => {
 };
 
 const verifySignature = (razorpayOrderId, razorpayPaymentId, signature) => {
+  if (typeof signature !== 'string' || !/^[a-f0-9]{64}$/i.test(signature)) return false;
   const body = `${razorpayOrderId}|${razorpayPaymentId}`;
   const expected = crypto
     .createHmac('sha256', process.env.RAZORPAY_KEY_SECRET)
     .update(body)
     .digest('hex');
-  return expected === signature;
+  const expectedBuffer = Buffer.from(expected);
+  const signatureBuffer = Buffer.from(signature);
+  return expectedBuffer.length === signatureBuffer.length
+    && crypto.timingSafeEqual(expectedBuffer, signatureBuffer);
+};
+
+const settlePayment = async (paymentId, { razorpayPaymentId, razorpaySignature } = {}) => {
+  const session = await mongoose.startSession();
+  let result;
+
+  try {
+    await session.withTransaction(async () => {
+      const payment = await Payment.findOneAndUpdate(
+        { _id: paymentId, status: { $in: ['created', 'failed'] } },
+        {
+          status: 'paid',
+          ...(razorpayPaymentId ? { razorpayPaymentId } : {}),
+          ...(razorpaySignature ? { razorpaySignature } : {}),
+        },
+        { new: true, session },
+      );
+
+      if (!payment) {
+        const existing = await Payment.findById(paymentId).session(session);
+        if (existing?.status === 'paid') {
+          result = { already_paid: true };
+          return;
+        }
+        throw new Error('Payment is not available for settlement');
+      }
+
+      if (payment.purpose === 'wallet_topup') {
+        const user = await User.findById(payment.userId).session(session);
+        if (!user) throw new Error('User not found');
+        user.walletBalance = Number((user.walletBalance + payment.amount).toFixed(2));
+        await user.save({ session });
+        await WalletTransaction.create([{
+          userId: user._id,
+          type: 'credit',
+          amount: payment.amount,
+          balance: user.walletBalance,
+          referenceType: 'razorpay',
+          reference: razorpayPaymentId || payment.razorpayOrderId,
+          note: 'Wallet top-up via Razorpay',
+        }], { session });
+        // Apply wallet bonus (best-effort)
+        benefits.applyWalletBonus(payment.userId, payment.amount, session).catch(() => {});
+        result = { balance: user.walletBalance, amount: payment.amount };
+        return;
+      }
+
+      if (payment.purpose === 'order') {
+        const order = await orderModel().findOneAndUpdate(
+          { _id: payment.referenceId, ownerId: String(payment.userId), paymentStatus: 'unpaid', paymentMethod: 'digital_payment', orderAmount: payment.amount },
+          { $set: { paymentStatus: 'paid' } },
+          { returnDocument: 'after', session },
+        );
+        if (!order) throw new Error('Payment could not be matched to an unpaid order at the recorded amount');
+        result = { order_id: payment.referenceId };
+        return;
+      }
+
+      throw new Error('Unsupported payment purpose');
+    });
+  } finally {
+    await session.endSession();
+  }
+
+  return result;
 };
 
 // POST /payment/razorpay/create-order
 // body: { purpose: 'order'|'wallet_topup', amount, order_id? }
 exports.createOrder = async (req, res, next) => {
   try {
-    const { purpose, amount, order_id } = req.body;
-    if (!purpose || !amount) return error(res, 'purpose and amount are required', 400);
+    const { purpose, amount: requestedAmount, order_id } = req.body;
     if (!['order', 'wallet_topup'].includes(purpose)) return error(res, 'Invalid purpose', 400);
-    if (amount <= 0 || amount > 500000) return error(res, 'Invalid amount', 400);
+    let amount = Number(requestedAmount);
 
     let referenceId = order_id || 'wallet';
 
     // For order payment — validate order belongs to user
     if (purpose === 'order') {
-      if (!order_id) return error(res, 'order_id required for order payment', 400);
-      const order = await Order.findOne({ _id: order_id, ownerId: req.user.id }).lean();
+      if (!mongoose.isValidObjectId(order_id)) return error(res, 'Valid order_id required for order payment', 400);
+      const order = await orderModel().findOne({ _id: order_id, ownerId: req.user.id, isGuest: false }).lean();
       if (!order) return error(res, 'Order not found', 404);
       if (order.paymentStatus === 'paid') return error(res, 'Order already paid', 409);
-      if (!['pending', 'confirmed', 'processing'].includes(order.orderStatus)) {
+      if (order.orderStatus === 'canceled') {
+        return error(res, 'This order was canceled. Place a new order to pay online.', 409);
+      }
+      if (order.paymentStatus !== 'unpaid' || order.paymentMethod !== 'digital_payment'
+          || !['pending', 'accepted', 'confirmed', 'processing'].includes(order.orderStatus)) {
         return error(res, 'Order cannot be paid at this stage', 409);
       }
       referenceId = String(order._id);
+      amount = order.orderAmount;
     }
 
+    const amountInPaise = Math.round(amount * 100);
+    if (!Number.isFinite(amount) || amountInPaise < 1 || amount > 500000) return error(res, 'Invalid amount', 400);
+    amount = amountInPaise / 100;
     const razorpay = getRazorpay();
     const rzpOrder = await razorpay.orders.create({
-      amount: Math.round(amount * 100), // paise
+      amount: amountInPaise,
       currency: 'INR',
       receipt: `bb_${Date.now()}`,
       notes: { purpose, userId: String(req.user.id), referenceId },
@@ -97,39 +175,18 @@ exports.verify = async (req, res, next) => {
     if (!payment) return error(res, 'Payment record not found', 404);
     if (payment.status === 'paid') return success(res, { already_paid: true }, 'Already verified');
 
-    // Mark payment as paid
-    payment.razorpayPaymentId = razorpay_payment_id;
-    payment.razorpaySignature = razorpay_signature;
-    payment.status = 'paid';
-    await payment.save();
-
-    // Fulfill based on purpose
-    if (payment.purpose === 'wallet_topup') {
-      const user = await User.findById(req.user.id);
-      if (!user) return error(res, 'User not found', 404);
-      user.walletBalance = Number((user.walletBalance + payment.amount).toFixed(2));
-      await user.save();
-      await WalletTransaction.create({
-        userId: user._id,
-        type: 'credit',
-        amount: payment.amount,
-        balance: user.walletBalance,
-        referenceType: 'razorpay',
-        reference: razorpay_payment_id,
-        note: `Wallet top-up via Razorpay`,
-      });
-      return success(res, { balance: user.walletBalance, amount: payment.amount }, 'Wallet topped up');
+    const razorpayPayment = await getRazorpay().payments.fetch(razorpay_payment_id);
+    if (
+      razorpayPayment.order_id !== razorpay_order_id
+      || razorpayPayment.status !== 'captured'
+      || razorpayPayment.amount !== Math.round(payment.amount * 100)
+      || razorpayPayment.currency !== payment.currency
+    ) {
+      return error(res, 'Payment is not captured for the expected amount', 400);
     }
 
-    if (payment.purpose === 'order') {
-      await Order.findByIdAndUpdate(payment.referenceId, {
-        paymentStatus: 'paid',
-        paymentMethod: 'digital_payment',
-      });
-      return success(res, { order_id: payment.referenceId }, 'Order payment verified');
-    }
-
-    return success(res, null, 'Payment verified');
+    const result = await settlePayment(payment._id, { razorpayPaymentId: razorpay_payment_id, razorpaySignature: razorpay_signature });
+    return success(res, result, payment.purpose === 'wallet_topup' ? 'Wallet topped up' : 'Payment verified');
   } catch (err) { next(err); }
 };
 
@@ -146,7 +203,14 @@ exports.webhook = async (req, res, next) => {
       .update(req.rawBody || JSON.stringify(req.body))
       .digest('hex');
 
-    if (expected !== signature) {
+    const expectedBuffer = Buffer.from(expected);
+    const signatureBuffer = typeof signature === 'string' && /^[a-f0-9]{64}$/i.test(signature)
+      ? Buffer.from(signature)
+      : Buffer.alloc(0);
+    if (
+      expectedBuffer.length !== signatureBuffer.length
+      || !crypto.timingSafeEqual(expectedBuffer, signatureBuffer)
+    ) {
       return res.status(400).json({ success: false, message: 'Invalid webhook signature' });
     }
 
@@ -156,15 +220,7 @@ exports.webhook = async (req, res, next) => {
       const rzpOrderId = event.payload?.payment?.entity?.order_id;
       if (rzpOrderId && rzpPaymentId) {
         const payment = await Payment.findOne({ razorpayOrderId: rzpOrderId });
-        if (payment && payment.status !== 'paid') {
-          payment.razorpayPaymentId = rzpPaymentId;
-          payment.status = 'paid';
-          await payment.save();
-          // Fulfill if not already done
-          if (payment.purpose === 'order') {
-            await Order.findByIdAndUpdate(payment.referenceId, { paymentStatus: 'paid', paymentMethod: 'digital_payment' });
-          }
-        }
+        if (payment) await settlePayment(payment._id, { razorpayPaymentId: rzpPaymentId });
       }
     }
 
@@ -173,7 +229,7 @@ exports.webhook = async (req, res, next) => {
       const reason = event.payload?.payment?.entity?.error_description;
       if (rzpOrderId) {
         await Payment.findOneAndUpdate(
-          { razorpayOrderId: rzpOrderId },
+          { razorpayOrderId: rzpOrderId, status: 'created' },
           { status: 'failed', failureReason: reason },
         );
       }
@@ -193,6 +249,9 @@ exports.refund = async (req, res, next) => {
     if (!payment) return error(res, 'Payment not found', 404);
     if (payment.status !== 'paid') return error(res, 'Only paid payments can be refunded', 400);
     if (payment.refundId) return error(res, 'Already refunded', 409);
+    if (payment.purpose === 'wallet_topup') {
+      return error(res, 'Wallet top-up refunds require a wallet adjustment and are not supported here', 409);
+    }
 
     const refundAmount = amount || payment.amount;
     const razorpay = getRazorpay();

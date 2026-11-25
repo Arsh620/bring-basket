@@ -1,9 +1,11 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { RefreshCw, ChevronDown } from 'lucide-react';
 import { toast } from 'sonner';
 import vendorApi from '@/lib/api/vendor';
+import { useVendorStore } from '@/store/vendor.store';
 
 interface Order {
   _id: string;
@@ -12,6 +14,8 @@ interface Order {
   orderAmount: number;
   paymentMethod: string;
   createdAt: string;
+  canVendorConfirm?: boolean;
+  canVendorCancel?: boolean;
   customer?: { fName?: string; phone?: string };
   items?: { itemName: string; quantity: number; lineTotal: number }[];
 }
@@ -32,39 +36,38 @@ const STATUS_COLOR: Record<string, string> = {
 
 const NEXT_STATUS: Record<string, string> = {
   pending: 'confirmed',
+  accepted: 'processing',
   confirmed: 'processing',
   processing: 'handover',
 };
 
 export default function VendorOrdersPage() {
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [total, setTotal] = useState(0);
+  const vendorId = useVendorStore((state) => state.vendor?._id);
   const [page, setPage] = useState(1);
   const [filter, setFilter] = useState('');
-  const [loading, setLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const res = await vendorApi.get('/vendor/orders', {
+  const query = useQuery({
+    queryKey: ['vendor-orders', vendorId, page, filter],
+    enabled: Boolean(vendorId),
+    queryFn: async ({ signal }) => {
+      const res = await vendorApi.get<{ data: Order[] | { orders: Order[] }; pagination?: { total: number } }>('/vendor/orders', {
         params: { page, limit: 15, status: filter || undefined },
+        signal,
       });
-      setOrders(res.data.data?.orders || res.data.data || []);
-      setTotal(res.data.pagination?.total || 0);
-    } catch { toast.error('Could not load orders'); }
-    finally { setLoading(false); }
-  };
+      const payload = res.data.data;
+      return { orders: Array.isArray(payload) ? payload : payload?.orders ?? [], total: res.data.pagination?.total ?? 0 };
+    },
+  });
+  const { orders = [], total = 0 } = query.data ?? {};
 
-  useEffect(() => { load(); }, [page, filter]);
-
-  const updateStatus = async (orderId: string, status: string) => {
+  const updateStatus = async (orderId: string, status: string, reason?: string) => {
     setBusy(orderId);
     try {
-      await vendorApi.put('/vendor/orders/update-status', { order_id: orderId, status });
+      await vendorApi.put('/vendor/orders/update-status', { order_id: orderId, status, ...(reason ? { reason } : {}) });
       toast.success(`Order marked as ${status}`);
-      load();
+      await query.refetch();
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Status update failed');
@@ -79,22 +82,24 @@ export default function VendorOrdersPage() {
           <p className="text-sm text-slate-500">{total} total orders</p>
         </div>
         <div className="flex gap-2">
-          <select value={filter} onChange={(e) => { setFilter(e.target.value); setPage(1); }}
+          <select aria-label="Order status" value={filter} onChange={(e) => { setFilter(e.target.value); setPage(1); }}
             className="rounded-xl border bg-white px-3 py-2 text-sm outline-none focus:border-emerald-500">
             <option value="">All statuses</option>
-            {['pending', 'confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'].map((s) => (
+            {['pending', 'accepted', 'confirmed', 'processing', 'handover', 'picked_up', 'delivered', 'canceled'].map((s) => (
               <option key={s} value={s}>{s.replace('_', ' ')}</option>
             ))}
           </select>
-          <button onClick={load} className="rounded-xl border p-2 text-slate-500 hover:text-emerald-600">
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+          <button aria-label="Refresh orders" disabled={query.isFetching} onClick={() => void query.refetch()} className="rounded-xl border p-2 text-slate-500 hover:text-emerald-600">
+            <RefreshCw size={16} className={query.isFetching ? 'animate-spin' : ''} />
           </button>
         </div>
       </div>
 
       <div className="space-y-3">
-        {loading ? (
+        {query.isPending ? (
           [...Array(5)].map((_, i) => <div key={i} className="h-20 animate-pulse rounded-2xl bg-slate-100" />)
+        ) : query.isError ? (
+          <p role="alert" className="rounded-2xl border bg-white p-6 text-center">Could not load orders. Use Refresh orders to try again.</p>
         ) : orders.length === 0 ? (
           <div className="rounded-2xl border bg-white py-16 text-center">
             <p className="font-medium text-slate-600">No orders found</p>
@@ -120,10 +125,20 @@ export default function VendorOrdersPage() {
                     className="flex items-center gap-1 rounded-xl border px-3 py-1.5 text-xs font-medium text-slate-600">
                     Details <ChevronDown size={12} className={expanded === order._id ? 'rotate-180' : ''} />
                   </button>
-                  {NEXT_STATUS[order.orderStatus] && (
+                  {NEXT_STATUS[order.orderStatus] && (order.orderStatus !== 'pending' || order.canVendorConfirm) && (
                     <button disabled={busy === order._id} onClick={() => updateStatus(order._id, NEXT_STATUS[order.orderStatus])}
                       className="rounded-xl bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-50 capitalize">
                       Mark {NEXT_STATUS[order.orderStatus]}
+                    </button>
+                  )}
+                  {order.canVendorCancel && (
+                    <button disabled={busy === order._id} onClick={() => {
+                      const reason = window.prompt('Why is this order being canceled?');
+                      if (reason === null) return;
+                      if (!reason.trim()) { toast.error('Cancellation reason is required'); return; }
+                      void updateStatus(order._id, 'canceled', reason.trim());
+                    }} className="rounded-xl border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 disabled:opacity-50">
+                      Cancel order
                     </button>
                   )}
                 </div>

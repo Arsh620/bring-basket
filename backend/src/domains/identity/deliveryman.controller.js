@@ -1,6 +1,7 @@
 const mongoose = require('mongoose');
 const DeliveryMan = require('../../models/auth/DeliveryMan');
-const Order = require('../orders/order.model');
+const { orderModel } = require('../orders/order-data');
+const { adminUpdateOrderStatus, assignDeliveryman } = require('../orders/order.service');
 const Notification = require('../../models/auth/Notification');
 const { success, error, paginated } = require('../../utils/response');
 const { paginate } = require('../../utils/pagination');
@@ -48,9 +49,9 @@ exports.updateFcmToken = async (req, res, next) => {
 // GET /deliveryman/current-orders
 exports.getCurrentOrders = async (req, res, next) => {
   try {
-    const orders = await Order.find({
+    const orders = await orderModel().find({
       deliverymanId: req.user.id,
-      orderStatus: { $in: ['confirmed', 'processing', 'handover', 'picked_up'] },
+      orderStatus: { $in: ['accepted', 'confirmed', 'processing', 'handover', 'picked_up'] },
     }).sort({ createdAt: -1 }).lean();
     return success(res, orders);
   } catch (err) { next(err); }
@@ -60,6 +61,7 @@ exports.getCurrentOrders = async (req, res, next) => {
 exports.getAllOrders = async (req, res, next) => {
   try {
     const { skip, page, limit } = paginate(req.query);
+    const Order = orderModel();
     const filter = { deliverymanId: new mongoose.Types.ObjectId(req.user.id) };
     const [orders, total] = await Promise.all([
       Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -73,6 +75,7 @@ exports.getAllOrders = async (req, res, next) => {
 exports.getOrderHistory = async (req, res, next) => {
   try {
     const { skip, page, limit } = paginate(req.query);
+    const Order = orderModel();
     const filter = { deliverymanId: new mongoose.Types.ObjectId(req.user.id), orderStatus: 'delivered' };
     const [orders, total] = await Promise.all([
       Order.find(filter).sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
@@ -85,8 +88,8 @@ exports.getOrderHistory = async (req, res, next) => {
 // GET /deliveryman/order?order_id=
 exports.getOrder = async (req, res, next) => {
   try {
-    if (!req.query.order_id) return error(res, 'order_id is required', 400);
-    const order = await Order.findOne({ _id: req.query.order_id, deliverymanId: req.user.id }).lean();
+    if (!mongoose.isValidObjectId(req.query.order_id)) return error(res, 'Valid order_id is required', 400);
+    const order = await orderModel().findOne({ _id: req.query.order_id, deliverymanId: req.user.id }).lean();
     if (!order) return error(res, 'Order not found', 404);
     return success(res, order);
   } catch (err) { next(err); }
@@ -97,13 +100,7 @@ exports.acceptOrder = async (req, res, next) => {
   try {
     const { order_id } = req.body;
     if (!order_id) return error(res, 'order_id is required', 400);
-    const order = await Order.findOneAndUpdate(
-      { _id: order_id, orderStatus: 'confirmed', deliverymanId: null },
-      { deliverymanId: req.user.id, orderStatus: 'processing' },
-      { new: true },
-    );
-    if (!order) return error(res, 'Order not available for acceptance', 409);
-    await DeliveryMan.findByIdAndUpdate(req.user.id, { $inc: { currentOrders: 1 } });
+    const order = await assignDeliveryman(order_id, req.user.id, undefined, true);
     return success(res, order);
   } catch (err) { next(err); }
 };
@@ -116,18 +113,11 @@ exports.updateOrderStatus = async (req, res, next) => {
     const allowed = ['processing', 'handover', 'picked_up', 'delivered'];
     if (!allowed.includes(status)) return error(res, 'Invalid status', 400);
 
-    const order = await Order.findOneAndUpdate(
-      { _id: order_id, deliverymanId: req.user.id },
-      { orderStatus: status, ...(status === 'delivered' ? { deliveredAt: new Date() } : {}) },
-      { new: true },
-    );
-    if (!order) return error(res, 'Order not found', 404);
-
-    if (status === 'delivered') {
-      await DeliveryMan.findByIdAndUpdate(req.user.id, {
-        $inc: { currentOrders: -1, orderCount: 1 },
-      });
+    const driver = await DeliveryMan.findById(req.user.id).select('status applicationStatus');
+    if (!driver?.status || (driver.applicationStatus && driver.applicationStatus !== 'approved')) {
+      return error(res, 'Delivery account is unavailable', 403);
     }
+    const order = await adminUpdateOrderStatus(order_id, { status }, undefined, req.user.id);
     return success(res, order);
   } catch (err) { next(err); }
 };

@@ -7,7 +7,8 @@ const PurchaseVendor = registeredModels['purchase_vendors'];
 
 exports.login = async (req, res, next) => {
   try {
-    const { email, password } = req.body;
+    const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
+    const { password } = req.body;
     if (!email || !password) return error(res, 'Email and password required', 400);
 
     const supplier = await PurchaseVendor.findOne({ email, status: true }).select('+password');

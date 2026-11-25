@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { ArrowDownLeft, ArrowUpRight, Plus, Wallet } from 'lucide-react';
 import { toast } from 'sonner';
@@ -28,19 +28,12 @@ export default function WalletPage() {
   const [txns, setTxns] = useState<Transaction[]>([]);
   const [addAmount, setAddAmount] = useState('');
   const [showAdd, setShowAdd] = useState(false);
-  const [busy, setBusy] = useState(false);
   const [page, setPage] = useState(1);
   const [total, setTotal] = useState(0);
 
   useEffect(() => { hydrate(); }, [hydrate]);
 
-  useEffect(() => {
-    if (!hasHydrated) return;
-    if (!isAuthenticated()) { router.push('/login'); return; }
-    loadData();
-  }, [hasHydrated, isAuthenticated, router, page]);
-
-  const loadData = async () => {
+  const loadData = useCallback(async () => {
     try {
       const [balRes, txnRes] = await Promise.all([
         customerApi.get('/customer/wallet/balance'),
@@ -50,25 +43,13 @@ export default function WalletPage() {
       setTxns(txnRes.data.data);
       setTotal(txnRes.data.pagination.total);
     } catch { toast.error('Could not load wallet'); }
-  };
+  }, [page]);
 
-  const handleAddFund = async (e: React.FormEvent) => {
-    e.preventDefault();
-    const amount = Number(addAmount);
-    if (!amount || amount <= 0) return toast.error('Enter a valid amount');
-    setBusy(true);
-    try {
-      const res = await customerApi.post('/customer/wallet/add-fund', { amount });
-      setBalance(res.data.data.balance);
-      if (res.data.data.bonus > 0) toast.success(`₹${amount} added + ₹${res.data.data.bonus} bonus!`);
-      else toast.success(`₹${amount} added to wallet`);
-      setAddAmount(''); setShowAdd(false);
-      loadData();
-    } catch (err: unknown) {
-      const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
-      toast.error(msg || 'Add fund failed');
-    } finally { setBusy(false); }
-  };
+  useEffect(() => {
+    if (!hasHydrated) return;
+    if (!isAuthenticated()) { router.push('/login'); return; }
+    void Promise.resolve().then(loadData);
+  }, [hasHydrated, isAuthenticated, loadData, router]);
 
   return (
     <main className="min-h-screen bg-slate-50">
@@ -105,7 +86,6 @@ export default function WalletPage() {
 
           {/* Payment options */}
           <div className="space-y-2">
-            {/* Razorpay */}
             {Number(addAmount) > 0 && (
               <RazorpayButton
                 purpose="wallet_topup"
@@ -114,14 +94,7 @@ export default function WalletPage() {
                 onSuccess={() => { setAddAmount(''); setShowAdd(false); loadData(); }}
               />
             )}
-
-            {/* COD / Manual (for testing) */}
-            <form onSubmit={handleAddFund} className="flex gap-2">
-              <button type="submit" disabled={busy || !addAmount}
-                className="w-full rounded-xl border py-2.5 text-sm font-semibold text-slate-600 disabled:opacity-50">
-                {busy ? '…' : 'Add (Test/Manual)'}
-              </button>
-            </form>
+            <p className="text-xs text-slate-500">Wallet funds are added only after Razorpay confirms payment.</p>
           </div>
         </div>
       )}

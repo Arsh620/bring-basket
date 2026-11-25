@@ -7,6 +7,10 @@ interface VendorUser {
   email?: string;
   phone?: string;
   image?: string;
+  isEmployee?: boolean;
+  storeId?: string;
+  modules?: string[];
+  employeeRoleId?: { _id: string; name: string; modules?: string[] } | string;
 }
 
 interface VendorAuthState {

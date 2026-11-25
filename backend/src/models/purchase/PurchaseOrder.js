@@ -40,6 +40,7 @@ const purchaseOrderSchema = new mongoose.Schema({
   approvalRequestedAt:  { type: Date },
   approvedAt:           { type: Date },
   approvedBy:           { type: String },
+  vendorLastProcessedAt:{ type: Date },
   taxType:              { type: String, enum: ['igst', 'cgst_sgst'], default: 'igst' },
   subTotal:             { type: Number, default: 0 },
   taxTotal:             { type: Number, default: 0 },

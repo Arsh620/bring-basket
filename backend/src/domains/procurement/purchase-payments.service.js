@@ -238,3 +238,21 @@ module.exports = {
   sumBillPayments,
   sumCompletedReturns,
 };
+
+// ── Auto-journal hook (fire-and-forget, never breaks the main flow) ───────────
+const _postJournal = async (payment) => {
+  try {
+    const { postPurchasePayment } = require('../accounting/journal.service');
+    await postPurchasePayment(payment);
+  } catch (e) {
+    require('../../config/logger').warn({ message: 'Journal post failed for payment', id: String(payment._id), err: e.message });
+  }
+};
+
+const _originalRecord = record;
+// Wrap record to auto-post journal after success
+module.exports.record = async (body) => {
+  const payment = await _originalRecord(body);
+  _postJournal(payment);
+  return payment;
+};

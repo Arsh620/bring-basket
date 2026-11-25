@@ -1,5 +1,5 @@
 const router = require('express').Router();
-const { adminAuth } = require('../../../middleware/auth');
+const { adminAuth, checkAdminModule } = require('../../../middleware/auth');
 const { checkRole } = require('../../../middleware/roleCheck');
 const purchaseVendors = require('../../../domains/procurement/purchase-vendors.controller');
 const purchaseOrders = require('../../../domains/procurement/purchase-orders.controller');
@@ -7,8 +7,12 @@ const purchaseBills = require('../../../domains/procurement/purchase-bills.contr
 const purchasePayments = require('../../../domains/procurement/purchase-payments.controller');
 const purchaseReturns = require('../../../domains/procurement/purchase-returns.controller');
 const purchaseBillInvoiceUpload = require('../../../domains/procurement/purchase-bill-invoice-upload');
+const vendorProducts = require('../../../domains/procurement/purchase-vendor-products.controller');
+const { supplierAuth } = require('../../../middleware/auth');
+const requireActiveSupplier = require('../../../domains/procurement/supplier-portal.middleware');
 
-const adminOnly = [adminAuth, checkRole('admin')];
+const adminOnly = [adminAuth, checkRole('admin'), checkAdminModule('purchase')];
+const supplierOnly = [supplierAuth, requireActiveSupplier];
 
 router.get('/purchases/vendors', adminOnly, purchaseVendors.getAll);
 router.get('/purchases/vendors/:id', adminOnly, purchaseVendors.getOne);
@@ -17,6 +21,22 @@ router.put('/purchases/vendors/:id', adminOnly, purchaseVendors.update);
 router.patch('/purchases/vendors/:id/status', adminOnly, purchaseVendors.updateStatus);
 router.patch('/purchases/vendors/:id/approval', adminOnly, purchaseVendors.updateApproval);
 router.delete('/purchases/vendors/:id', adminOnly, purchaseVendors.remove);
+
+// Vendor Products (admin — any vendor)
+router.get('/purchases/vendors/:vendorId/products', adminOnly, vendorProducts.getAll);
+router.post('/purchases/vendors/:vendorId/products', adminOnly, vendorProducts.create);
+router.get('/purchases/vendors/:vendorId/products/:id', adminOnly, vendorProducts.getOne);
+router.put('/purchases/vendors/:vendorId/products/:id', adminOnly, vendorProducts.update);
+router.patch('/purchases/vendors/:vendorId/products/:id/toggle', adminOnly, vendorProducts.toggle);
+router.delete('/purchases/vendors/:vendorId/products/:id', adminOnly, vendorProducts.remove);
+
+// Vendor Products (supplier portal — own products)
+router.get('/supplier/products', supplierOnly, vendorProducts.getAll);
+router.post('/supplier/products', supplierOnly, vendorProducts.create);
+router.get('/supplier/products/:id', supplierOnly, vendorProducts.getOne);
+router.put('/supplier/products/:id', supplierOnly, vendorProducts.update);
+router.patch('/supplier/products/:id/toggle', supplierOnly, vendorProducts.toggle);
+router.delete('/supplier/products/:id', supplierOnly, vendorProducts.remove);
 
 router.get('/purchases/orders', adminOnly, purchaseOrders.getAll);
 router.get('/purchases/orders/:id', adminOnly, purchaseOrders.getOne);

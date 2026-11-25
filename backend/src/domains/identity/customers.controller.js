@@ -6,6 +6,26 @@ const Order = require('../orders/order.model');
 const { success, error, paginated } = require('../../utils/response');
 const { paginate } = require('../../utils/pagination');
 
+const getCustomerDashboardPeriods = (now = new Date()) => {
+  const dateParts = Object.fromEntries(new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Kolkata',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(now).map(({ type, value }) => [type, value]));
+  const year = Number(dateParts.year);
+  const yearStart = new Date(`${year}-01-01T00:00:00+05:30`);
+  const nextYearStart = new Date(`${year + 1}-01-01T00:00:00+05:30`);
+  const todayStart = new Date(`${dateParts.year}-${dateParts.month}-${dateParts.day}T00:00:00+05:30`);
+
+  return {
+    year,
+    yearStart,
+    nextYearStart,
+    newCustomersStart: new Date(todayStart.getTime() - (30 * 24 * 60 * 60 * 1000)),
+  };
+};
+
 // GET /admin/customers?search=&status=&page=&limit=
 exports.getAll = async (req, res, next) => {
   try {
@@ -21,6 +41,99 @@ exports.getAll = async (req, res, next) => {
       User.countDocuments(filter),
     ]);
     return paginated(res, data, total, page, limit);
+  } catch (err) { next(err); }
+};
+
+// GET /admin/dashboard/customer-stats?zoneId=
+exports.getDashboardStats = async (req, res, next) => {
+  try {
+    const filter = {};
+    if (req.query.zoneId && req.query.zoneId !== 'all') {
+      if (!mongoose.isValidObjectId(req.query.zoneId)) return error(res, 'Invalid zone ID', 400);
+      filter.zoneId = new mongoose.Types.ObjectId(req.query.zoneId);
+    }
+
+    const { year, yearStart, nextYearStart, newCustomersStart } = getCustomerDashboardPeriods();
+    const [result] = await User.aggregate([
+      { $match: filter },
+      {
+        $facet: {
+          summary: [{
+            $group: {
+              _id: null,
+              totalCustomers: { $sum: 1 },
+              activeCustomers: {
+                $sum: {
+                  $cond: [{
+                    $eq: [{
+                      $convert: {
+                        input: { $ifNull: ['$status', 1] },
+                        to: 'int',
+                        onError: 0,
+                        onNull: 1,
+                      },
+                    }, 1],
+                  }, 1, 0],
+                },
+              },
+              blockedCustomers: {
+                $sum: {
+                  $cond: [{
+                    $eq: [{
+                      $convert: {
+                        input: { $ifNull: ['$status', 1] },
+                        to: 'int',
+                        onError: 0,
+                        onNull: 1,
+                      },
+                    }, 0],
+                  }, 1, 0],
+                },
+              },
+              newCustomers: {
+                $sum: { $cond: [{ $gte: ['$createdAt', newCustomersStart] }, 1, 0] },
+              },
+            },
+          }],
+          monthly: [
+            { $match: { createdAt: { $gte: yearStart, $lt: nextYearStart } } },
+            {
+              $group: {
+                _id: {
+                  $dateToString: {
+                    format: '%Y-%m',
+                    date: '$createdAt',
+                    timezone: 'Asia/Kolkata',
+                  },
+                },
+                count: { $sum: 1 },
+              },
+            },
+          ],
+        },
+      },
+    ]);
+
+    const summary = result?.summary?.[0] ?? {};
+    const monthlyCounts = new Map((result?.monthly ?? []).map(({ _id, count }) => [_id, count]));
+    const monthlyCustomers = Array.from({ length: 12 }, (_, index) => {
+      const month = String(index + 1).padStart(2, '0');
+      return {
+        month: `${year}-${month}`,
+        label: new Intl.DateTimeFormat('en', { month: 'short', timeZone: 'UTC' })
+          .format(new Date(Date.UTC(year, index, 1))),
+        count: monthlyCounts.get(`${year}-${month}`) ?? 0,
+      };
+    });
+
+    return success(res, {
+      year,
+      totalCustomers: summary.totalCustomers ?? 0,
+      activeCustomers: summary.activeCustomers ?? 0,
+      blockedCustomers: summary.blockedCustomers ?? 0,
+      newCustomers: summary.newCustomers ?? 0,
+      monthlyCustomers,
+    });
   } catch (err) { next(err); }
 };
 

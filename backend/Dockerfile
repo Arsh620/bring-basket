@@ -10,11 +10,11 @@ WORKDIR /app
 
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
-COPY --from=deps /app/node_modules ./node_modules
-COPY . .
+COPY --from=deps --chown=appuser:appgroup /app/node_modules ./node_modules
+COPY --chown=appuser:appgroup . .
 
 RUN mkdir -p logs storage/purchase-bill-invoices && \
-    chown -R appuser:appgroup /app
+    chown appuser:appgroup logs storage storage/purchase-bill-invoices
 
 USER appuser
 

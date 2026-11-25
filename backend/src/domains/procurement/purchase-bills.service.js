@@ -397,8 +397,30 @@ const voidBill = async (id) => {
   return voidedBill;
 };
 
-const createFromPurchaseOrder = async (id, body) => {
+const supplierProcessItems = (order, quantities) => {
+  if (!quantities || typeof quantities !== 'object' || Array.isArray(quantities)) {
+    throw new AppError('quantities must be an object', 400);
+  }
+  return order.items.reduce((items, item) => {
+    const raw = quantities[String(item._id)];
+    const qty = raw === undefined || raw === null || raw === '' ? 0 : Number(raw);
+    if (!Number.isFinite(qty) || qty < 0) {
+      throw new AppError(`Invalid processing quantity for ${item.itemName}`, 400);
+    }
+    const remaining = Math.max(0, Number(item.qty) - Number(item.qtyBilled || 0));
+    if (qty - remaining > 0.0001) {
+      throw new AppError(`Processing quantity exceeds the remaining quantity for ${item.itemName}`, 400);
+    }
+    if (qty > 0) items.push({ purchaseOrderItemId: item._id, qty });
+    return items;
+  }, []);
+};
+
+const createFromPurchaseOrder = async (id, body = {}, options = {}) => {
   validateId(id, 'purchase order');
+  if (!body || typeof body !== 'object' || Array.isArray(body)) {
+    throw new AppError('Request body must be an object', 400);
+  }
   if (body.dueDate && !validDate(new Date(body.dueDate))) {
     throw new AppError('dueDate must be a valid date', 400);
   }
@@ -411,12 +433,17 @@ const createFromPurchaseOrder = async (id, body) => {
   try {
     await session.withTransaction(async () => {
       const order = await PurchaseOrder.findById(id).session(session);
-      if (!order) throw new AppError('Purchase order not found', 404);
+      if (!order || (options.supplierId && String(order.purchaseVendorId) !== String(options.supplierId))) {
+        throw new AppError('Purchase order not found', 404);
+      }
       if (!['open', 'partially_billed'].includes(order.status)) {
         throw new AppError('Only issued purchase orders can be converted to a bill', 409);
       }
 
-      const billItems = buildBillItems(order, body.items);
+      const requestedItems = options.fromVendorPortal
+        ? supplierProcessItems(order, body.quantities)
+        : body.items;
+      const billItems = buildBillItems(order, requestedItems);
       const totals = calculateTotals(billItems);
       const billNumber = await getNextBillNumber(session);
       const [bill] = await PurchaseBill.create([{
@@ -436,6 +463,8 @@ const createFromPurchaseOrder = async (id, body) => {
         balanceDue: totals.total,
         notes: body.notes ?? order.notes,
         stockReceived: false,
+        fromVendorPortal: Boolean(options.fromVendorPortal),
+        adminNotificationSeen: !options.fromVendorPortal,
         items: billItems,
       }], { session });
 
@@ -447,6 +476,7 @@ const createFromPurchaseOrder = async (id, body) => {
         (item) => Number(item.qtyBilled || 0) >= Number(item.qty) - 0.0001,
       );
       order.status = fullyBilled ? 'billed' : 'partially_billed';
+      if (options.fromVendorPortal) order.vendorLastProcessedAt = new Date();
       await order.save({ session });
       createdBill = bill;
     });

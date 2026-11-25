@@ -43,7 +43,7 @@ app.get('/health', (req, res) => {
 
 const router = express.Router();
 const notifications = require('./src/domains/identity/notifications.controller');
-const { customerAuth, adminAuth, deliverymanAuth } = require('./src/middleware/auth');
+const { customerAuth, adminAuth, deliverymanAuth, checkAdminModule } = require('./src/middleware/auth');
 const { checkRole } = require('./src/middleware/roleCheck');
 
 const adminOnly = [adminAuth, checkRole('admin')];
@@ -57,7 +57,7 @@ router.put('/customer/notifications/:id/read', customerAuth, notifications.markR
 router.get('/deliveryman/notifications', deliverymanAuth, notifications.getCustomerNotifications);
 
 // Admin broadcast
-router.post('/admin/notifications/broadcast', adminOnly, notifications.adminBroadcast);
+router.post('/admin/notifications/broadcast', [...adminOnly, checkAdminModule('notification')], notifications.adminBroadcast);
 
 app.use('/api/v1', router);
 app.use(errorHandler);

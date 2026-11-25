@@ -1,6 +1,6 @@
 'use client';
 
-import { useAuthStore } from '@/store/auth.store';
+import { getWorkspaceLoginPath, useAuthStore } from '@/store/auth.store';
 import { usePathname, useRouter } from 'next/navigation';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import {
@@ -10,9 +10,13 @@ import {
 import { LogOut, Menu, UserRound } from 'lucide-react';
 import { toast } from 'sonner';
 import api from '@/lib/api/client';
+import { isPrimaryAdmin } from '@/lib/admin-permissions';
 
 const pageTitles: Record<string, string> = {
   '/admin/dashboard': 'Overview',
+  '/admin/employee-dashboard': 'Employee dashboard',
+  '/master/employees': 'Master workspace',
+  '/master/roles': 'Master workspace',
   '/admin/catalog/items': 'Products',
   '/admin/catalog/categories': 'Categories',
   '/admin/catalog/brands': 'Brands',
@@ -23,7 +27,8 @@ const pageTitles: Record<string, string> = {
   '/admin/modules': 'Modules',
   '/admin/zones': 'Delivery zones',
   '/admin/warehouse': 'Warehouses',
-  '/admin/admins': 'Administrators',
+  '/admin/admins': 'Employees',
+  '/admin/employees': 'Employees',
   '/admin/roles': 'Admin roles',
   '/admin/inventory/stock-movements': 'Stock movements',
   '/admin/inventory/batch-write-offs': 'Stock write-offs',
@@ -36,6 +41,8 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
   const { admin, logout } = useAuthStore();
   const router = useRouter();
   const pathname = usePathname();
+  const primaryAdmin = isPrimaryAdmin(admin);
+  const roleName = typeof admin?.roleId === 'object' ? admin.roleId?.name : null;
 
   const handleLogout = async () => {
     try {
@@ -44,7 +51,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
       toast.error('Could not notify the server. Your local session has still been signed out.');
     } finally {
       logout();
-      router.push('/admin/login');
+      router.replace(getWorkspaceLoginPath());
     }
   };
 
@@ -60,7 +67,7 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
         </button>
         <div>
           <p className="text-[10px] font-semibold uppercase tracking-[0.17em] text-gray-400">Bring Basket</p>
-          <h1 className="mt-0.5 text-sm font-bold text-gray-800">{pageTitles[pathname] ?? 'Admin workspace'}</h1>
+          <h1 className="mt-0.5 text-sm font-bold text-gray-800">{pageTitles[pathname] ?? (primaryAdmin ? 'Admin workspace' : 'Employee workspace')}</h1>
         </div>
       </div>
       <DropdownMenu>
@@ -70,14 +77,14 @@ export function Header({ onMenuClick }: { onMenuClick?: () => void }) {
           </Avatar>
           <span className="hidden text-left sm:block">
             <span className="block max-w-36 truncate text-sm font-semibold text-gray-800">
-              {admin ? `${admin.fName} ${admin.lName}`.trim() : 'Administrator'}
+              {admin ? `${admin.fName} ${admin.lName ?? ''}`.trim() : 'Account'}
             </span>
-            <span className="mt-0.5 block text-[11px] text-gray-500">Admin account</span>
+            <span className="mt-0.5 block text-[11px] text-gray-500">{roleName || (primaryAdmin ? 'Admin account' : 'Employee account')}</span>
           </span>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
           <DropdownMenuItem className="gap-2">
-            <UserRound size={16} /> Account
+            <UserRound size={16} /> {roleName || (primaryAdmin ? 'Admin account' : 'Employee account')}
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem onClick={handleLogout} className="gap-2 text-red-600">

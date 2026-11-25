@@ -83,9 +83,10 @@ exports.getAll = async (req, res, next) => {
     if (req.query.type === 'non_veg') filter.veg = false;
 
     const { skip, page, limit } = paginate(req.query);
+    // Native queries preserve legacy numeric store IDs alongside ObjectIds during migration.
     const [items, total] = await Promise.all([
-      Item.find(filter).sort({ orderCount: -1, name: 1 }).skip(skip).limit(limit).lean(),
-      Item.countDocuments(filter),
+      Item.collection.find(filter).sort({ orderCount: -1, name: 1 }).skip(skip).limit(limit).toArray(),
+      Item.collection.countDocuments(filter),
     ]);
     const stocked = await storeStockService.getStoreStocks(items.map((i) => ({ ...i, storeId: store._id })));
     return paginated(res, stocked.map(publicItem), total, page, limit);

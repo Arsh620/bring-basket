@@ -26,7 +26,7 @@ async function dmFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
     headers: { 'content-type': 'application/json', ...(token ? { authorization: `Bearer ${token}` } : {}), ...options.headers },
   });
   const data = await res.json();
-  if (!res.ok || !data.success) throw new Error(data.message || 'Request failed');
+  if (!res.ok || !data.success) throw Object.assign(new Error(data.message || 'Request failed'), { status: res.status });
   return data.data as T;
 }
 
@@ -43,11 +43,21 @@ const STATUS_COLORS: Record<string, string> = {
 };
 
 const NEXT_STATUS: Record<string, string> = {
+  accepted: 'processing',
   confirmed: 'processing',
   processing: 'handover',
   handover: 'picked_up',
   picked_up: 'delivered',
 };
+
+async function readDashboard(signal?: AbortSignal) {
+  const [profile, current, history] = await Promise.all([
+    dmFetch<Profile>('/deliveryman/profile', { signal }),
+    dmFetch<Order[]>('/deliveryman/current-orders', { signal }),
+    dmFetch<Order[] | { data: Order[] }>('/deliveryman/all-orders?limit=20', { signal }),
+  ]);
+  return { profile, current, history: Array.isArray(history) ? history : history.data };
+}
 
 export default function DeliverymanPage() {
   const router = useRouter();
@@ -58,28 +68,32 @@ export default function DeliverymanPage() {
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState('');
 
-  const load = useCallback(async () => {
-    try {
-      const [prof, curr, all] = await Promise.all([
-        dmFetch<Profile>('/deliveryman/profile'),
-        dmFetch<Order[]>('/deliveryman/current-orders'),
-        dmFetch<{ data: Order[] }>('/deliveryman/all-orders?limit=20'),
-      ]);
-      setProfile(prof);
-      setCurrentOrders(curr);
-      setAllOrders((all as unknown as { data: Order[] }).data ?? (all as unknown as Order[]));
-    } catch (err) {
-      if (err instanceof Error && err.message.includes('401')) {
-        router.push('/deliveryman/login');
-      }
+  const applyDashboard = useCallback((data: Awaited<ReturnType<typeof readDashboard>>) => {
+    setProfile(data.profile);
+    setCurrentOrders(data.current);
+    setAllOrders(data.history);
+  }, []);
+
+  const handleLoadError = useCallback((error: unknown) => {
+    const status = (error as { status?: number } | null)?.status;
+    if (status === 401 || status === 403) {
+      localStorage.removeItem('dm_token');
+      router.replace('/deliveryman/login');
+      return;
     }
+    setMsg('Could not load delivery orders.');
   }, [router]);
+  const refresh = () => readDashboard().then(applyDashboard).catch(handleLoadError);
 
   useEffect(() => {
     const token = localStorage.getItem('dm_token');
-    if (!token) { router.push('/deliveryman/login'); return; }
-    void load();
-  }, [load, router]);
+    if (!token) { router.replace('/deliveryman/login'); return; }
+    const controller = new AbortController();
+    void readDashboard(controller.signal)
+      .then((data) => { if (!controller.signal.aborted) applyDashboard(data); })
+      .catch((error) => { if (!controller.signal.aborted) handleLoadError(error); });
+    return () => controller.abort();
+  }, [applyDashboard, handleLoadError, router]);
 
   const updateStatus = async (order: Order, status: string) => {
     setBusy(true);
@@ -90,7 +104,7 @@ export default function DeliverymanPage() {
         body: JSON.stringify({ order_id: order._id, status }),
       });
       setMsg(`Order ${order.orderNumber} updated to ${status}`);
-      await load();
+      await refresh();
     } catch (err) {
       setMsg(err instanceof Error ? err.message : 'Failed');
     } finally {
@@ -154,7 +168,7 @@ export default function DeliverymanPage() {
               {t === 'current' ? 'Current Orders' : 'All Orders'}
             </button>
           ))}
-          <button onClick={() => void load()} className="ml-auto rounded-xl border bg-white px-4 py-2 text-sm text-slate-600">Refresh</button>
+          <button onClick={() => void refresh()} className="ml-auto rounded-xl border bg-white px-4 py-2 text-sm text-slate-600">Refresh</button>
         </div>
 
         {msg && <p className="rounded-xl bg-emerald-50 px-4 py-3 text-sm text-emerald-700">{msg}</p>}

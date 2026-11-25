@@ -4,6 +4,8 @@ const jwt = require('jsonwebtoken');
 const PUBLIC_ROUTES = [
   { method: 'POST', path: /^\/api\/v1\/(admin|customer|vendor|supplier|warehouse|deliveryman)\/auth\/login$/ },
   { method: 'POST', path: /^\/api\/v1\/(admin|customer|vendor)\/auth\/register$/ },
+  { method: 'GET',  path: /^\/api\/v1\/supplier\/registration\/options$/ },
+  { method: 'POST', path: /^\/api\/v1\/supplier\/registration$/ },
   { method: 'POST', path: /^\/api\/v1\/customer\/auth\/forgot-password$/ },
   { method: 'POST', path: /^\/api\/v1\/customer\/auth\/verify-otp$/ },
   { method: 'PUT',  path: /^\/api\/v1\/customer\/auth\/reset-password$/ },

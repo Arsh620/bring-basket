@@ -1,9 +1,10 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Plus, Pencil, Trash2, Search, ToggleLeft, ToggleRight } from 'lucide-react';
 import { toast } from 'sonner';
 import vendorApi from '@/lib/api/vendor';
+import { useVendorStore } from '@/store/vendor.store';
 
 interface Item {
   _id: string;
@@ -13,15 +14,24 @@ interface Item {
   status: boolean;
   sku?: string;
   image?: string;
+  storeId: string;
+}
+
+interface StoreOption {
+  _id: string;
+  name: string;
 }
 
 const currency = (n: number) =>
   new Intl.NumberFormat('en-IN', { style: 'currency', currency: 'INR', maximumFractionDigits: 0 }).format(n);
 
-const EMPTY_FORM = { name: '', price: '', stock: '', sku: '', description: '', image: '' };
+const EMPTY_FORM = { name: '', price: '', stock: '', sku: '', description: '', image: '', storeId: '' };
 
 export default function VendorItemsPage() {
+  const vendor = useVendorStore((state) => state.vendor);
   const [items, setItems] = useState<Item[]>([]);
+  const [stores, setStores] = useState<StoreOption[]>([]);
+  const [storeId, setStoreId] = useState(vendor?.storeId || '');
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
   const [search, setSearch] = useState('');
@@ -31,22 +41,69 @@ export default function VendorItemsPage() {
   const [form, setForm] = useState(EMPTY_FORM);
   const [busy, setBusy] = useState(false);
 
+  const fetchItems = useCallback(async () => {
+    const response = await vendorApi.get('/vendor/items', {
+      params: { page, limit: 20, search: search || undefined, storeId: storeId || undefined },
+    });
+    return {
+      items: response.data.data as Item[],
+      total: response.data.pagination?.total || 0,
+    };
+  }, [page, search, storeId]);
+
+  useEffect(() => {
+    let active = true;
+    if (vendor?.isEmployee && vendor.storeId) {
+      Promise.resolve().then(() => {
+        if (!active) return;
+        const assignedStore = { _id: vendor.storeId as string, name: 'Assigned store' };
+        setStores([assignedStore]);
+        setStoreId((current) => current || assignedStore._id);
+      });
+      return () => { active = false; };
+    }
+    vendorApi.get('/vendor/stores')
+      .then((response) => {
+        if (!active) return;
+        const storeData = response.data.data as StoreOption[];
+        setStores(storeData);
+        setStoreId((current) => current || storeData[0]?._id || '');
+      })
+      .catch(() => { if (active) toast.error('Could not load stores'); });
+    return () => { active = false; };
+  }, [vendor]);
+
+  useEffect(() => {
+    let active = true;
+    fetchItems()
+      .then(({ items: loadedItems, total: loadedTotal }) => {
+        if (active) {
+          setItems(loadedItems);
+          setTotal(loadedTotal);
+        }
+      })
+      .catch(() => { if (active) toast.error('Could not load products'); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [fetchItems]);
+
   const load = async () => {
     setLoading(true);
     try {
-      const res = await vendorApi.get('/vendor/items', { params: { page, limit: 20, search: search || undefined } });
-      setItems(res.data.data || []);
-      setTotal(res.data.pagination?.total || 0);
-    } catch { toast.error('Could not load products'); }
-    finally { setLoading(false); }
+      const { items: loadedItems, total: loadedTotal } = await fetchItems();
+      setItems(loadedItems);
+      setTotal(loadedTotal);
+    } catch {
+      toast.error('Could not load products');
+    } finally {
+      setLoading(false);
+    }
   };
 
-  useEffect(() => { load(); }, [page, search]);
-
-  const openCreate = () => { setEditing(null); setForm(EMPTY_FORM); setShowForm(true); };
+  const openCreate = () => { setEditing(null); setForm({ ...EMPTY_FORM, storeId }); setShowForm(true); };
   const openEdit = (item: Item) => {
     setEditing(item);
-    setForm({ name: item.name, price: String(item.price), stock: String(item.stock), sku: item.sku || '', description: '', image: item.image || '' });
+    setForm({ name: item.name, price: String(item.price), stock: String(item.stock), sku: item.sku || '', description: '', image: item.image || '', storeId: item.storeId });
     setShowForm(true);
   };
 
@@ -54,7 +111,7 @@ export default function VendorItemsPage() {
     e.preventDefault();
     setBusy(true);
     try {
-      const payload = { ...form, price: Number(form.price), stock: Number(form.stock) };
+      const payload = { ...form, price: Number(form.price), stock: Number(form.stock), storeId: editing?.storeId || storeId };
       if (editing) {
         await vendorApi.put(`/vendor/items/${editing._id}`, payload);
         toast.success('Product updated');
@@ -98,6 +155,15 @@ export default function VendorItemsPage() {
           <Plus size={16} /> Add Product
         </button>
       </div>
+
+      {stores.length > 1 && (
+        <label className="mb-4 block max-w-sm text-sm font-medium text-slate-700">
+          Store
+          <select value={storeId} onChange={(event) => setStoreId(event.target.value)} className="mt-1.5 w-full rounded-xl border bg-white px-3 py-2.5">
+            {stores.map((store) => <option key={store._id} value={store._id}>{store.name}</option>)}
+          </select>
+        </label>
+      )}
 
       <div className="mb-4 relative">
         <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />

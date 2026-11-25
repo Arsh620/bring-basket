@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const mongoose = require('mongoose');
 const procurementRoutes = require('../src/routes/v1/procurement');
 const purchaseVendorsService = require('../src/domains/procurement/purchase-vendors.service');
 const purchaseBillsService = require('../src/domains/procurement/purchase-bills.service');
@@ -7,6 +8,8 @@ const purchasePaymentsService = require('../src/domains/procurement/purchase-pay
 const purchaseReturnsService = require('../src/domains/procurement/purchase-returns.service');
 const PurchaseReturn = require('../src/models/purchase/PurchaseReturn');
 const PurchaseOrder = require('../src/models/purchase/PurchaseOrder');
+const PurchaseBill = require('../src/models/purchase/PurchaseBill');
+const Sequence = require('../src/models/purchase/Sequence');
 const WarehouseItemBatch = require('../src/models/warehouse/WarehouseItemBatch');
 const { adminAuth } = require('../src/middleware/auth');
 
@@ -23,6 +26,18 @@ test('procurement endpoints are admin-authenticated under the purchases route gr
     ['PATCH', '/purchases/vendors/:id/status'],
     ['PATCH', '/purchases/vendors/:id/approval'],
     ['DELETE', '/purchases/vendors/:id'],
+    ['GET', '/purchases/vendors/:vendorId/products'],
+    ['POST', '/purchases/vendors/:vendorId/products'],
+    ['GET', '/purchases/vendors/:vendorId/products/:id'],
+    ['PUT', '/purchases/vendors/:vendorId/products/:id'],
+    ['PATCH', '/purchases/vendors/:vendorId/products/:id/toggle'],
+    ['DELETE', '/purchases/vendors/:vendorId/products/:id'],
+    ['GET', '/supplier/products'],
+    ['POST', '/supplier/products'],
+    ['GET', '/supplier/products/:id'],
+    ['PUT', '/supplier/products/:id'],
+    ['PATCH', '/supplier/products/:id/toggle'],
+    ['DELETE', '/supplier/products/:id'],
     ['GET', '/purchases/orders'],
     ['GET', '/purchases/orders/:id'],
     ['POST', '/purchases/orders'],
@@ -51,6 +66,7 @@ test('procurement endpoints are admin-authenticated under the purchases route gr
     ['POST', '/purchases/returns/:id/void'],
   ]);
   for (const layer of procurementRoutes.stack.filter((entry) => entry.route)) {
+    if (layer.route.path.startsWith('/supplier/')) continue; // supplier routes use supplierAuth
     assert.equal(layer.route.stack[0].handle, adminAuth, `${layer.route.path} must require admin authentication`);
   }
 });
@@ -94,8 +110,93 @@ test('purchase vendor approval rejects unsupported decisions', async () => {
   );
 });
 
+test('supplier PO conversion checks owner in the transaction and records vendor processing metadata', async (t) => {
+  const originals = {
+    startSession: mongoose.startSession,
+    findOrder: PurchaseOrder.findById,
+    sequenceExists: Sequence.exists,
+    nextSequence: Sequence.findOneAndUpdate,
+    createBill: PurchaseBill.create,
+  };
+  t.after(() => {
+    mongoose.startSession = originals.startSession;
+    PurchaseOrder.findById = originals.findOrder;
+    Sequence.exists = originals.sequenceExists;
+    Sequence.findOneAndUpdate = originals.nextSequence;
+    PurchaseBill.create = originals.createBill;
+  });
+
+  const orderId = new mongoose.Types.ObjectId();
+  const supplierId = new mongoose.Types.ObjectId();
+  const itemId = new mongoose.Types.ObjectId();
+  const orderItem = {
+    _id: itemId,
+    itemId: new mongoose.Types.ObjectId(),
+    itemName: 'Apples',
+    qty: 5,
+    qtyBilled: 1,
+    rate: 10,
+    taxPercent: 0,
+    unit: 'kg',
+  };
+  const order = {
+    _id: orderId,
+    purchaseVendorId: supplierId,
+    poNumber: 'PO-10',
+    status: 'open',
+    taxType: 'igst',
+    items: [orderItem],
+    async save() {},
+  };
+  order.items.id = (id) => order.items.find((item) => String(item._id) === String(id));
+  let billInput;
+  let sessionsEnded = 0;
+  mongoose.startSession = async () => ({
+    withTransaction: async (operation) => operation(),
+    endSession: async () => { sessionsEnded += 1; },
+  });
+  PurchaseOrder.findById = (id) => {
+    assert.equal(String(id), String(orderId));
+    return { session: async () => order };
+  };
+  Sequence.exists = () => ({ session: async () => true });
+  Sequence.findOneAndUpdate = async () => ({ value: 41 });
+  PurchaseBill.create = async (documents) => {
+    billInput = documents[0];
+    return [{ _id: new mongoose.Types.ObjectId(), ...documents[0] }];
+  };
+
+  const bill = await purchaseBillsService.createFromPurchaseOrder(
+    String(orderId),
+    { quantities: { [String(itemId)]: 2 } },
+    { supplierId: String(supplierId), fromVendorPortal: true },
+  );
+  assert.equal(bill.billNumber, 41);
+  assert.equal(billInput.stockReceived, false);
+  assert.equal(billInput.fromVendorPortal, true);
+  assert.equal(billInput.adminNotificationSeen, false);
+  assert.equal(billInput.items[0].qty, 2);
+  assert.equal(orderItem.qtyBilled, 3);
+  assert.equal(order.status, 'partially_billed');
+  assert.ok(order.vendorLastProcessedAt instanceof Date);
+  assert.equal(sessionsEnded, 1);
+
+  PurchaseOrder.findById = () => ({
+    session: async () => ({ ...order, purchaseVendorId: new mongoose.Types.ObjectId() }),
+  });
+  await assert.rejects(
+    purchaseBillsService.createFromPurchaseOrder(
+      String(orderId),
+      { quantities: { [String(itemId)]: 1 } },
+      { supplierId: String(supplierId), fromVendorPortal: true },
+    ),
+    (error) => error.statusCode === 404,
+  );
+});
+
 test('purchase order routes require admin authentication', () => {
   for (const layer of procurementRoutes.stack.filter((entry) => entry.route)) {
+    if (layer.route.path.startsWith('/supplier/')) continue;
     assert.equal(layer.route.stack[0].handle, adminAuth, `${layer.route.path} must require admin authentication`);
   }
 });

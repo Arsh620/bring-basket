@@ -31,6 +31,13 @@ const contactSchema = new mongoose.Schema({
   mobile:     { type: String },
 }, { _id: true });
 
+const documentSchema = new mongoose.Schema({
+  path:         { type: String, required: true },
+  originalName: { type: String, required: true },
+  size:         { type: Number, required: true },
+  contentType:  { type: String, required: true },
+}, { _id: true, timestamps: true });
+
 const purchaseVendorSchema = new mongoose.Schema({
   legacyId:           { type: Number },
   salutation:         { type: String },
@@ -61,10 +68,12 @@ const purchaseVendorSchema = new mongoose.Schema({
   notes:              { type: String },
   password:           { type: String, select: false },
   passwordSetAt:      { type: Date },
+  termsAcceptedAt:    { type: Date },
   // Embedded
   addresses:  [addressSchema],
   banks:      [bankSchema],
   contacts:   [contactSchema],
+  documents:  [documentSchema],
 }, { timestamps: true });
 
 purchaseVendorSchema.index({ legacyId: 1 }, { unique: true, sparse: true });

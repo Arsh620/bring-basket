@@ -1,6 +1,7 @@
 const router = require('express').Router();
 const dm = require('../../../domains/identity/deliveryman.controller');
 const dmWallet = require('../../../domains/identity/dm-wallet.controller');
+const dmCtrl = require('../../../domains/identity/dm.controller');
 const { deliverymanAuth } = require('../../../middleware/auth');
 
 router.use(deliverymanAuth);
@@ -9,6 +10,7 @@ router.get('/profile', dm.getProfile);
 router.put('/update-profile', dm.updateProfile);
 router.post('/update-active-status', dm.updateActiveStatus);
 router.put('/update-fcm-token', dm.updateFcmToken);
+router.get('/dashboard', dmCtrl.getDmDashboard);
 router.get('/current-orders', dm.getCurrentOrders);
 router.get('/all-orders', dm.getAllOrders);
 router.get('/order-delivery-history', dm.getOrderHistory);
@@ -22,5 +24,11 @@ router.post('/record-location', dm.recordLocation);
 router.get('/wallet/balance', dmWallet.balance);
 router.get('/wallet/transactions', dmWallet.transactions);
 router.get('/earnings', dmWallet.earnings);
+
+// Reviews (DM sees own reviews)
+router.get('/reviews', (req, res, next) => {
+  req.params.id = req.user.id;
+  return dmCtrl.getDmReviews(req, res, next);
+});
 
 module.exports = router;

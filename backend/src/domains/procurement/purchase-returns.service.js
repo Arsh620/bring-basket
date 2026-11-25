@@ -5,6 +5,7 @@ const WarehouseStockMovement = require('../../models/warehouse/WarehouseStockMov
 const StoreStockMovement = require('../../models/store/StoreStockMovement');
 const AppError = require('../../utils/AppError');
 const { paginate } = require('../../utils/pagination');
+const { parseCsv } = require('../../utils/csv');
 
 const REASONS = ['damaged', 'expired', 'wrong_item', 'excess', 'defective', 'overstock', 'other'];
 const STATUSES = ['draft', 'completed', 'void', 'cancelled'];
@@ -826,40 +827,6 @@ const exportBillItems = async (id) => {
     content: `\uFEFF${toCsv(rows)}`,
     filename: `bill_${String(result.bill.billNumber || result.bill._id).replace(/[^\w.-]/g, '_')}_return_template.csv`,
   };
-};
-
-const parseCsv = (content) => {
-  const rows = [];
-  let row = [];
-  let cell = '';
-  let quoted = false;
-  const input = content.replace(/^\uFEFF/, '');
-  for (let index = 0; index < input.length; index += 1) {
-    const char = input[index];
-    if (quoted) {
-      if (char === '"' && input[index + 1] === '"') {
-        cell += '"';
-        index += 1;
-      } else if (char === '"') quoted = false;
-      else cell += char;
-    } else if (char === '"') quoted = true;
-    else if (char === ',') {
-      row.push(cell);
-      cell = '';
-    } else if (char === '\n' || char === '\r') {
-      if (char === '\r' && input[index + 1] === '\n') index += 1;
-      row.push(cell);
-      if (row.some((value) => value.trim())) rows.push(row);
-      row = [];
-      cell = '';
-    } else cell += char;
-  }
-  if (quoted) throw new AppError('CSV contains an unclosed quoted field', 400);
-  if (cell || row.length) {
-    row.push(cell);
-    if (row.some((value) => value.trim())) rows.push(row);
-  }
-  return rows;
 };
 
 const importCsv = async (id, content) => {

@@ -8,7 +8,7 @@ const api = axios.create({
 api.interceptors.request.use((config) => {
   if (typeof window !== 'undefined') {
     const token = localStorage.getItem('admin_token');
-    if (token) config.headers.Authorization = `Bearer ${token}`;
+    if (token && config.url !== '/admin/auth/login') config.headers.Authorization = `Bearer ${token}`;
   }
   return config;
 });
@@ -17,8 +17,11 @@ api.interceptors.response.use(
   (res) => res,
   (err) => {
     if (err.response?.status === 401 && typeof window !== 'undefined') {
-      localStorage.removeItem('admin_token');
-      window.dispatchEvent(new Event('admin:unauthorized'));
+      const token = localStorage.getItem('admin_token');
+      if (token && err.config?.headers?.Authorization === `Bearer ${token}`) {
+        localStorage.removeItem('admin_token');
+        window.dispatchEvent(new Event('admin:unauthorized'));
+      }
     }
     return Promise.reject(err);
   }

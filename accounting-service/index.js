@@ -52,11 +52,12 @@ const loyalty = require('./src/domains/identity/loyalty.controller');
 const cashback = require('./src/domains/store/cashback.controller');
 const customers = require('./src/domains/identity/customers.controller');
 const walletBonus = require('./src/domains/store/wallet-bonus.controller');
-const { customerAuth, adminAuth } = require('./src/middleware/auth');
+const { customerAuth, adminAuth, checkAdminModule } = require('./src/middleware/auth');
 const { checkRole } = require('./src/middleware/roleCheck');
 const { authLimiter } = require('./src/middleware/rateLimiter');
 
 const adminOnly = [adminAuth, checkRole('admin')];
+const access = (module) => [...adminOnly, checkAdminModule(module)];
 
 // Customer wallet
 customerRouter.get('/customer/wallet/balance', customerAuth, wallet.balance);
@@ -73,26 +74,27 @@ customerRouter.get('/cashback/list', cashback.list);
 customerRouter.get('/cashback/getCashback', cashback.getCashback);
 
 // Admin customer management
-customerRouter.get('/admin/customers', adminOnly, customers.getAll);
-customerRouter.get('/admin/customers/:id', adminOnly, customers.getOne);
-customerRouter.patch('/admin/customers/:id/status', adminOnly, customers.updateStatus);
-customerRouter.post('/admin/customers/:id/wallet/add-fund', adminOnly, customers.addWalletFund);
-customerRouter.post('/admin/customers/:id/loyalty/adjust', adminOnly, customers.adjustLoyalty);
-customerRouter.get('/admin/customers/:id/orders', adminOnly, customers.getOrders);
+customerRouter.get('/admin/dashboard/customer-stats', access('customer_management'), customers.getDashboardStats);
+customerRouter.get('/admin/customers', access('customer_management'), customers.getAll);
+customerRouter.get('/admin/customers/:id', access('customer_management'), customers.getOne);
+customerRouter.patch('/admin/customers/:id/status', access('customer_management'), customers.updateStatus);
+customerRouter.post('/admin/customers/:id/wallet/add-fund', access('customer_management'), customers.addWalletFund);
+customerRouter.post('/admin/customers/:id/loyalty/adjust', access('customer_management'), customers.adjustLoyalty);
+customerRouter.get('/admin/customers/:id/orders', access('customer_management'), customers.getOrders);
 
 // Admin cashback
-customerRouter.get('/admin/cashback', adminOnly, cashback.adminGetAll);
-customerRouter.post('/admin/cashback', adminOnly, cashback.adminCreate);
-customerRouter.put('/admin/cashback/:id', adminOnly, cashback.adminUpdate);
-customerRouter.patch('/admin/cashback/:id/status', adminOnly, cashback.adminUpdateStatus);
-customerRouter.delete('/admin/cashback/:id', adminOnly, cashback.adminDelete);
+customerRouter.get('/admin/cashback', access('cashback'), cashback.adminGetAll);
+customerRouter.post('/admin/cashback', access('cashback'), cashback.adminCreate);
+customerRouter.put('/admin/cashback/:id', access('cashback'), cashback.adminUpdate);
+customerRouter.patch('/admin/cashback/:id/status', access('cashback'), cashback.adminUpdateStatus);
+customerRouter.delete('/admin/cashback/:id', access('cashback'), cashback.adminDelete);
 
 // Admin wallet bonus
-customerRouter.get('/admin/wallet-bonus', adminOnly, walletBonus.getAll);
-customerRouter.post('/admin/wallet-bonus', adminOnly, walletBonus.create);
-customerRouter.put('/admin/wallet-bonus/:id', adminOnly, walletBonus.update);
-customerRouter.patch('/admin/wallet-bonus/:id/status', adminOnly, walletBonus.updateStatus);
-customerRouter.delete('/admin/wallet-bonus/:id', adminOnly, walletBonus.remove);
+customerRouter.get('/admin/wallet-bonus', access('customer_management'), walletBonus.getAll);
+customerRouter.post('/admin/wallet-bonus', access('customer_management'), walletBonus.create);
+customerRouter.put('/admin/wallet-bonus/:id', access('customer_management'), walletBonus.update);
+customerRouter.patch('/admin/wallet-bonus/:id/status', access('customer_management'), walletBonus.updateStatus);
+customerRouter.delete('/admin/wallet-bonus/:id', access('customer_management'), walletBonus.remove);
 
 app.use('/api/v1', customerRouter);
 app.use(errorHandler);

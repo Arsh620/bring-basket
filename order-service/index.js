@@ -9,6 +9,8 @@ const logger = require('./src/config/logger');
 const { connectRedis, getRedis, closeRedis } = require('./src/config/redis');
 const sanitize = require('./src/middleware/sanitize');
 const errorHandler = require('./src/middleware/errorHandler');
+const serviceAuth = require('./src/middleware/service-auth')('backend', 'order-service');
+const orderController = require('./src/domains/orders/order.controller');
 
 require('./src/domains/orders/cart.model');
 require('./src/domains/orders/order.model');
@@ -42,6 +44,29 @@ app.get('/health', (req, res) => {
 
 app.use('/api/v1/customer', require('./src/routes/v1/orders'));
 app.use('/api/v1/admin', require('./src/routes/v1/orders/admin'));
+
+const internalAdminRoutes = express.Router();
+internalAdminRoutes.use(serviceAuth);
+internalAdminRoutes.get('/dashboard-stats', orderController.adminDashboardStats);
+app.use('/internal/admin', internalAdminRoutes);
+
+const vendorOrderRoutes = express.Router();
+vendorOrderRoutes.use(serviceAuth, (req, res, next) => {
+  const context = req.serviceClaims?.vendorContext;
+  if (!Array.isArray(context?.storeIds) || context.storeIds.length === 0) {
+    return res.status(403).json({ success: false, message: 'Vendor store scope is required' });
+  }
+  req.vendorContext = {
+    storeIds: context.storeIds.map(String),
+    orderConfirmationModel: context.orderConfirmationModel,
+    canStoreCancel: context.canStoreCancel === true,
+  };
+  return next();
+});
+vendorOrderRoutes.get('/orders', orderController.vendorList);
+vendorOrderRoutes.get('/dashboard', orderController.vendorDashboard);
+vendorOrderRoutes.put('/orders/update-status', orderController.vendorUpdateStatus);
+app.use('/internal/vendor', vendorOrderRoutes);
 app.use(errorHandler);
 
 const shutdown = async (signal) => {

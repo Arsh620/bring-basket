@@ -21,6 +21,7 @@ const publicStore = (s) => ({
   maximumShippingCharge: s.maximumShippingCharge,
   perKmShippingCharge: s.perKmShippingCharge,
   freeDelivery: s.freeDelivery,
+  selfDeliverySystem: s.selfDeliverySystem,
   delivery: s.delivery,
   takeAway: s.takeAway,
   rating: s.rating,

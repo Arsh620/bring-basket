@@ -12,7 +12,7 @@ const {
 
 exports.getAll = async (req, res, next) => {
   try {
-    const result = await getAll(req.query);
+    const result = await getAll(req.warehouseQuery ?? req.query);
     return res.json({
       success: true,
       data: result.requests,

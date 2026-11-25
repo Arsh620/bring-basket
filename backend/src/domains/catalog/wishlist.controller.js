@@ -10,7 +10,7 @@ exports.list = async (req, res, next) => {
     const { skip, page, limit } = paginate(req.query);
     const [items, total] = await Promise.all([
       Wishlist.find({ userId: req.user.id })
-        .populate('itemId', 'name image price discount discountType stock avgRating')
+        .populate('itemId', 'name image price moduleId discount discountType stock avgRating')
         .sort({ createdAt: -1 }).skip(skip).limit(limit).lean(),
       Wishlist.countDocuments({ userId: req.user.id }),
     ]);

@@ -1,6 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import Link from 'next/link';
+import { useCustomerStore, type Customer } from '@/store/customer.store';
+
+type CustomerSession = { token: string; user: Customer };
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
 
@@ -346,11 +350,11 @@ export default function ShopPage() {
     setMessage('');
     try {
       const result = accountMode === 'login'
-        ? await request<{ token: string }>('/customer/auth/login', {
+        ? await request<CustomerSession>('/customer/auth/login', {
           method: 'POST',
           body: { email: loginEmail, password: loginPassword },
         })
-        : await request<{ token: string }>('/customer/auth/register', {
+        : await request<CustomerSession>('/customer/auth/register', {
           method: 'POST',
           body: {
             fName: registerFirstName,
@@ -360,7 +364,7 @@ export default function ShopPage() {
             password: loginPassword,
           },
         });
-      localStorage.setItem('customer_token', result.token);
+      useCustomerStore.getState().setAuth(result.token, result.user);
       setIsSignedIn(true);
       if (cart.length && selectedStore) {
         await request('/customer/cart/merge-guest', {
@@ -380,7 +384,7 @@ export default function ShopPage() {
   };
 
   const signOutCustomer = async () => {
-    localStorage.removeItem('customer_token');
+    useCustomerStore.getState().logout();
     setIsSignedIn(false);
     setAddresses([]);
     setSelectedAddressId('');
@@ -612,6 +616,11 @@ export default function ShopPage() {
             <button type="submit" disabled={busy || !cart.length || !selectedStore || cartStoreConflict || (!canDeliver && !canTakeAway)} className="w-full rounded-lg bg-emerald-700 px-4 py-3 font-semibold text-white disabled:opacity-50">
               {busy ? 'Please wait…' : 'Place order'}
             </button>
+            {isSignedIn && selectedStore && cart.length > 0 && !cartStoreConflict && (
+              <Link href={`/checkout?store=${encodeURIComponent(selectedStore._id)}`} className="block rounded-lg border border-emerald-200 px-4 py-3 text-center text-sm font-semibold text-emerald-800">
+                View checkout and payment options
+              </Link>
+            )}
           </form>
 
           <section className="rounded-2xl border bg-white p-5">

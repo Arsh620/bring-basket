@@ -54,6 +54,7 @@ app.get('/health', (req, res) => {
 });
 
 app.use('/api/v1/admin', require('./src/routes/v1/procurement'));
+app.use('/api/v1/supplier', require('./src/routes/v1/supplier'));
 app.use(errorHandler);
 
 const shutdown = async (signal) => {

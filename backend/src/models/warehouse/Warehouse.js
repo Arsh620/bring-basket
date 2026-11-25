@@ -23,7 +23,16 @@ const warehouseSchema = new mongoose.Schema({
   serviceRadiusKm: { type: Number, min: 0, default: 10 },
   status: { type: String, default: 'active', maxlength: 10 },
   isDefault: { type: Boolean, default: false },
-}, { timestamps: true });
+}, {
+  timestamps: true,
+  toJSON: {
+    transform(_document, data) {
+      delete data.passwordHash;
+      delete data.rememberToken;
+      return data;
+    },
+  },
+});
 
 warehouseSchema.index({ type: 1, status: 1, state: 1 });
 warehouseSchema.index({ parentId: 1 });

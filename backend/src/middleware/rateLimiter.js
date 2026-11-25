@@ -18,7 +18,8 @@ const baseOptions = {
 exports.globalLimiter = rateLimit({
   ...baseOptions,
   windowMs: 15 * 60 * 1000,
-  max: 100,
+  max: process.env.NODE_ENV === 'production' ? 300 : 2000,
+  skip: (req) => req.path.endsWith('/auth/me') || req.path.endsWith('/auth/logout'),
   message: { success: false, message: 'Too many requests, please try again later' },
   store: makeStore(),
 });

@@ -6,7 +6,15 @@ const orderStockReservationSchema = new mongoose.Schema({
   status: { type: String, enum: ['reserved', 'committed', 'released'], required: true },
   items: [{
     itemId: { type: mongoose.Schema.Types.ObjectId, ref: 'Item', required: true },
+    variant: { type: String, default: '' },
     qty: { type: Number, required: true, min: 0.0001 },
+    batchTracked: { type: Boolean, default: false },
+    allocations: [{
+      batchId: { type: mongoose.Schema.Types.ObjectId, ref: 'ItemBatch' },
+      batchCode: { type: String },
+      expiryDate: { type: Date, default: null },
+      qty: { type: Number, min: 0.0001 },
+    }],
   }],
   committedAt: { type: Date },
   releasedAt: { type: Date },

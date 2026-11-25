@@ -5,12 +5,10 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { Store } from 'lucide-react';
 import { toast } from 'sonner';
-import { useVendorStore } from '@/store/vendor.store';
 import vendorApi from '@/lib/api/vendor';
 
 export default function VendorRegisterPage() {
   const router = useRouter();
-  const setAuth = useVendorStore((s) => s.setAuth);
   const [form, setForm] = useState({ fName: '', lName: '', phone: '', email: '', password: '' });
   const [busy, setBusy] = useState(false);
 
@@ -22,9 +20,8 @@ export default function VendorRegisterPage() {
     setBusy(true);
     try {
       const res = await vendorApi.post('/vendor/auth/register', form);
-      setAuth(res.data.data.token, res.data.data.vendor);
-      toast.success('Account created! Awaiting admin approval.');
-      router.push('/vendor/dashboard');
+      toast.success(res.data.message || 'Account created! Awaiting admin approval.');
+      router.push('/vendor/login');
     } catch (err: unknown) {
       const msg = (err as { response?: { data?: { message?: string } } })?.response?.data?.message;
       toast.error(msg || 'Registration failed');

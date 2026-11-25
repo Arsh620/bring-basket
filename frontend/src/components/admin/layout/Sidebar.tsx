@@ -6,6 +6,8 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   ArrowLeftRight,
+  BarChart3,
+  Bell,
   Bookmark,
   Boxes,
   Building2,
@@ -17,6 +19,8 @@ import {
   FileText,
   Zap,
   Megaphone,
+  MessageSquare,
+  Package2,
   Search,
   Settings,
   ShoppingBag,
@@ -30,6 +34,7 @@ import {
   Ruler,
   RotateCcw,
   Shield,
+  Star,
   Store,
   Tags,
   Ticket,
@@ -38,6 +43,8 @@ import {
   Wallet,
   X,
 } from 'lucide-react';
+import { canAccessAdminModule, getAdminDashboardPath, isPrimaryAdmin, sidebarModuleByKey } from '@/lib/admin-permissions';
+import { useAuthStore } from '@/store/auth.store';
 
 const iconByKey = {
   items: Package,
@@ -84,19 +91,36 @@ const iconByKey = {
   cashback: Ticket,
   'wallet-bonus': Wallet,
   settings: Settings,
+  'brand-sales': Zap,
+  'cancel-reasons': ClipboardMinus,
+  'parcel-categories': Package2,
+  'order-refunds': RotateCcw,
+  membership: Star,
+  'withdraw-requests': Wallet,
+  'store-disbursements': CreditCard,
+  'activity-logs': FileText,
+  reports: BarChart3,
+  notifications: Bell,
+  conversations: MessageSquare,
+  pos: ShoppingBag,
+  account: CreditCard,
+  vehicles: Truck,
 } as const;
 
 const groups = [
-  { label: 'Order management', links: [['order-all', 'All orders'], ['order-stock-pending', 'Stock pending'], ['order-pending', 'Pending'], ['order-confirmed', 'Confirmed'], ['order-processing', 'Processing'], ['order-handover', 'Handover'], ['order-picked-up', 'Picked up'], ['order-delivered', 'Delivered'], ['order-canceling', 'Canceling'], ['order-canceled', 'Canceled'], ['order-failed', 'Failed']] },
+  { label: 'Order management', links: [['order-all', 'All orders'], ['order-stock-pending', 'Stock pending'], ['order-pending', 'Pending'], ['order-confirmed', 'Confirmed'], ['order-processing', 'Processing'], ['order-handover', 'Handover'], ['order-picked-up', 'Picked up'], ['order-delivered', 'Delivered'], ['order-canceling', 'Canceling'], ['order-canceled', 'Canceled'], ['order-failed', 'Failed'], ['order-refunds', 'Refund requests'], ['cancel-reasons', 'Cancel reasons'], ['parcel-categories', 'Parcel categories']] },
   { label: 'Procurement', links: [['purchase-vendors', 'Vendors'], ['purchase-orders', 'Purchase Orders'], ['purchase-bills', 'Purchase Bills'], ['purchase-returns', 'Purchase Returns'], ['purchase-payments', 'Payments']] },
   { label: 'Catalog', links: [['items', 'Products'], ['categories', 'Categories'], ['brands', 'Brands'], ['units', 'Units'], ['unit-groups', 'Unit groups'], ['item-batches', 'Item batches']] },
   { label: 'Stores & delivery', links: [['stores', 'Stores'], ['modules', 'Modules'], ['zones', 'Delivery zones']] },
   { label: 'Inventory', links: [['warehouses', 'Warehouses'], ['warehouse-stock', 'Warehouse stock'], ['stock-transfers', 'Stock transfers'], ['store-stock-requests', 'Store stock requests'], ['stock-movements', 'Stock movements'], ['batch-write-offs', 'Stock write-offs']] },
-  { label: 'Marketing', links: [['banners', 'Banners'], ['flash-sales', 'Flash Sales'], ['campaigns', 'Campaigns'], ['advertisements', 'Advertisements'], ['coupons', 'Coupons']] },
-  { label: 'User management', links: [['customers', 'Customers'], ['vendors', 'Vendors'], ['delivery-men', 'Delivery Men']] },
-  { label: 'Promotions', links: [['cashback', 'Cashback Rules'], ['wallet-bonus', 'Wallet Bonus']] },
-  { label: 'Access control', links: [['admins', 'Administrators'], ['roles', 'Admin roles']] },
-  { label: 'Configuration', links: [['settings', 'Business Settings']] },
+  { label: 'Marketing', links: [['banners', 'Banners'], ['flash-sales', 'Flash Sales'], ['campaigns', 'Campaigns'], ['advertisements', 'Advertisements'], ['coupons', 'Coupons'], ['brand-sales', 'Brand Sales']] },
+  { label: 'User management', links: [['customers', 'Customers'], ['vendors', 'Vendors'], ['delivery-men', 'Delivery Men'], ['vehicles', 'Vehicles']] },
+  { label: 'Promotions', links: [['cashback', 'Cashback Rules'], ['wallet-bonus', 'Wallet Bonus'], ['membership', 'Membership Plans']] },
+  { label: 'Finance', links: [['withdraw-requests', 'Withdraw Requests'], ['store-disbursements', 'Store Disbursements'], ['account', 'Accounting & GST'], ['reports', 'Reports']] },
+  { label: 'Communication', links: [['notifications', 'Push Notifications'], ['conversations', 'Conversations']] },
+  { label: 'POS', links: [['pos', 'Point of Sale']] },
+  { label: 'Access control', links: [['admins', 'Employees'], ['roles', 'Admin roles']] },
+  { label: 'Configuration', links: [['settings', 'Business Settings'], ['activity-logs', 'Activity Logs']] },
 ] as const;
 
 const hrefByKey: Record<string, string> = {
@@ -110,7 +134,7 @@ const hrefByKey: Record<string, string> = {
   modules: '/admin/modules',
   zones: '/admin/zones',
   warehouses: '/admin/warehouse',
-  admins: '/admin/admins',
+  admins: '/admin/employees',
   roles: '/admin/roles',
   'stock-movements': '/admin/inventory/stock-movements',
   'batch-write-offs': '/admin/inventory/batch-write-offs',
@@ -143,11 +167,30 @@ const hrefByKey: Record<string, string> = {
   'delivery-men': '/admin/delivery-men',
   cashback: '/admin/cashback',
   'wallet-bonus': '/admin/wallet-bonus',
+  membership: '/admin/membership',
+  'brand-sales': '/admin/brand-sales',
+  'cancel-reasons': '/admin/cancel-reasons',
+  'parcel-categories': '/admin/parcel-categories',
+  'order-refunds': '/admin/orders/refunds',
+  'withdraw-requests': '/admin/withdraw-requests',
+  'employees': '/admin/employees',
+  'store-disbursements': '/admin/store-disbursements',
+  'activity-logs': '/admin/activity-logs',
+  reports: '/admin/reports',
+  notifications: '/admin/notifications',
+  conversations: '/admin/conversations',
+  pos: '/admin/pos',
+  account: '/admin/account',
+  vehicles: '/admin/vehicles',
   settings: '/admin/settings',
 };
 
 export function Sidebar({ mobileOpen = false, onNavigate }: { mobileOpen?: boolean; onNavigate?: () => void }) {
   const pathname = usePathname();
+  const admin = useAuthStore((state) => state.admin);
+  const master = isPrimaryAdmin(admin);
+  const dashboardPath = getAdminDashboardPath(admin);
+  const isDashboard = pathname === dashboardPath;
   const searchRef = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState('');
   const [compact, setCompact] = useState(false);
@@ -157,13 +200,16 @@ export function Sidebar({ mobileOpen = false, onNavigate }: { mobileOpen?: boole
   const visibleGroups = useMemo(
     () => groups.map((group) => ({
       ...group,
-      links: group.links.filter(([key, label]) => (
-        !normalizedQuery
-        || label.toLowerCase().includes(normalizedQuery)
-        || key.replaceAll('-', ' ').includes(normalizedQuery)
-      )),
+      links: group.links.filter(([key, label]) => {
+        const permissionKey = sidebarModuleByKey[key];
+        return permissionKey
+          && canAccessAdminModule(admin, permissionKey)
+          && (!normalizedQuery
+            || label.toLowerCase().includes(normalizedQuery)
+            || key.replaceAll('-', ' ').includes(normalizedQuery));
+      }),
     })).filter((group) => group.links.length > 0),
-    [normalizedQuery],
+    [admin, normalizedQuery],
   );
 
   useEffect(() => {
@@ -186,7 +232,7 @@ export function Sidebar({ mobileOpen = false, onNavigate }: { mobileOpen?: boole
   const content = (
     <>
       <div className={`flex h-[88px] shrink-0 items-center border-b border-white/[0.08] ${isCompact ? 'flex-col justify-center gap-1 px-2' : 'justify-between px-3'}`}>
-        <Link href="/admin/dashboard" onClick={onNavigate} title={isCompact ? 'Bring Basket dashboard' : undefined} className={`flex min-w-0 items-center ${isCompact ? 'justify-center' : 'flex-1'}`}>
+        <Link href={dashboardPath} onClick={onNavigate} title={isCompact ? 'Bring Basket dashboard' : undefined} className={`flex min-w-0 items-center ${isCompact ? 'justify-center' : 'flex-1'}`}>
           {isCompact ? (
             <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#ffe500] text-[#08234b] shadow-md shadow-black/15">
               <ShoppingBasket size={19} strokeWidth={2.2} />
@@ -254,22 +300,26 @@ export function Sidebar({ mobileOpen = false, onNavigate }: { mobileOpen?: boole
         <div>
           {!isCompact && <p className="px-3 pb-2 text-[9px] font-bold uppercase tracking-[0.2em] text-[#c2d2ec]/55">Workspace</p>}
           <Link
-            href="/admin/dashboard"
+            href={dashboardPath}
             onClick={onNavigate}
-            aria-current={pathname === '/admin/dashboard' ? 'page' : undefined}
+            aria-current={isDashboard ? 'page' : undefined}
             title={isCompact ? 'Overview' : undefined}
-            className={`group relative flex items-center overflow-hidden rounded-xl py-3 text-sm font-semibold transition-all duration-200 ${isCompact ? 'justify-center px-0' : 'gap-3 px-3'} ${pathname === '/admin/dashboard' ? 'bg-[#ffe500] text-[#08234b] shadow-lg shadow-black/15' : 'text-white/65 hover:bg-white/[0.07] hover:text-white'}`}
+            className={`group relative flex items-center overflow-hidden rounded-xl py-3 text-sm font-semibold transition-all duration-200 ${isCompact ? 'justify-center px-0' : 'gap-3 px-3'} ${isDashboard ? 'bg-[#ffe500] text-[#08234b] shadow-lg shadow-black/15' : 'text-white/65 hover:bg-white/[0.07] hover:text-white'}`}
           >
-            {pathname === '/admin/dashboard' && <span className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-[#0755b8]" />}
-            <LayoutDashboard size={16} className={pathname === '/admin/dashboard' ? 'text-[#0755b8]' : 'text-white/45 transition group-hover:text-[#ffe500]'} />
-            {!isCompact && <>Overview<span className={`ml-auto text-[10px] ${pathname === '/admin/dashboard' ? 'text-[#08234b]/55' : 'text-white/25'}`}>01</span></>}
+            {isDashboard && <span className="absolute inset-y-2 left-0 w-[3px] rounded-r-full bg-[#0755b8]" />}
+            <LayoutDashboard size={16} className={isDashboard ? 'text-[#0755b8]' : 'text-white/45 transition group-hover:text-[#ffe500]'} />
+            {!isCompact && <>Overview<span className={`ml-auto text-[10px] ${isDashboard ? 'text-[#08234b]/55' : 'text-white/25'}`}>01</span></>}
           </Link>
         </div>
         {visibleGroups.length === 0 && (
           <div className="mx-1 rounded-xl border border-dashed border-white/10 px-3 py-5 text-center">
             <Search size={17} className="mx-auto text-white/30" />
-            <p className="mt-2 text-xs font-medium text-white/65">No pages found</p>
-            <p className="mt-1 text-[10px] text-white/35">Try another search.</p>
+            <p className="mt-2 text-xs font-medium text-white/65">
+              {normalizedQuery ? 'No pages found' : 'No sidebar pages assigned'}
+            </p>
+            <p className="mt-1 text-[10px] text-white/35">
+              {normalizedQuery ? 'Try another search.' : 'Ask a Master admin to assign module access to this role.'}
+            </p>
           </div>
         )}
         {visibleGroups.map((group) => {
@@ -301,7 +351,9 @@ export function Sidebar({ mobileOpen = false, onNavigate }: { mobileOpen?: boole
             {expanded && <div id={groupId} className="space-y-0.5">
               {group.links.map(([key, label]) => {
                 const Icon = iconByKey[key];
-                const href = hrefByKey[key];
+                const href = master && key === 'admins' ? '/master/employees'
+                  : master && key === 'roles' ? '/master/roles'
+                    : hrefByKey[key];
                 const active = pathname === href || pathname.startsWith(`${href}/`);
                 return (
                   <Link

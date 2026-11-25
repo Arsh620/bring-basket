@@ -28,6 +28,9 @@ test('store endpoints include schedule management under the versioned admin rout
     ['PATCH', '/campaigns/:id/status'], ['DELETE', '/campaigns/:id'],
     ['GET', '/advertisements'], ['POST', '/advertisements'], ['PUT', '/advertisements/:id'],
     ['PATCH', '/advertisements/:id/status'], ['DELETE', '/advertisements/:id'],
+    ['GET', '/brand-sales'], ['POST', '/brand-sales'], ['GET', '/brand-sales/:id'],
+    ['PUT', '/brand-sales/:id'], ['PATCH', '/brand-sales/:id/toggle'],
+    ['POST', '/brand-sales/:id/end-now'], ['DELETE', '/brand-sales/:id'],
   ]);
   assert.equal(typeof storeService.getAll, 'function');
   assert.equal(typeof storeService.getSchedule, 'function');

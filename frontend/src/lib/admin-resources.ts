@@ -1,7 +1,7 @@
 export type AdminField = {
   key: string;
   label: string;
-  type?: 'text' | 'email' | 'password' | 'number' | 'textarea' | 'boolean' | 'select' | 'json' | 'date';
+  type?: 'text' | 'email' | 'password' | 'number' | 'textarea' | 'boolean' | 'select' | 'json' | 'multi-select' | 'date';
   required?: boolean;
   placeholder?: string;
   createOnly?: boolean;
@@ -23,6 +23,7 @@ export type AdminResource = {
   icon: string;
   paginated?: boolean;
   searchable?: boolean;
+  zoneFilter?: boolean;
   readOnly?: boolean;
   createOnly?: boolean;
   createEndpoint?: string;
@@ -30,6 +31,7 @@ export type AdminResource = {
   deleteEndpoint?: string;
   statusEndpoint?: string;
   statusValues?: { active: string | boolean; inactive: string | boolean };
+  toggleOnly?: boolean;
   extraAction?: 'schedule' | 'conversions';
   fields: AdminField[];
   columns: { key: string; label: string; type?: 'status' | 'date' | 'number' }[];
@@ -105,10 +107,11 @@ export const adminResources: Record<string, AdminResource> = {
     key: 'unit-groups', title: 'Unit groups', description: 'Define base units and their conversion groups.',
     endpoint: '/admin/unit-groups', singular: 'unit group', icon: 'Layers', extraAction: 'conversions',
     statusEndpoint: '/admin/unit-groups/:id/status',
+    statusValues: activeStatus,
     fields: [
       { key: 'name', label: 'Group name', required: true },
       { key: 'baseUnit', label: 'Base unit', required: true, placeholder: 'e.g. gram' },
-      { key: 'status', label: 'Status', type: 'select', options: [{ label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' }] },
+      { key: 'status', label: 'Active', type: 'boolean' },
     ],
     columns: [{ key: 'name', label: 'Group' }, { key: 'baseUnit', label: 'Base unit' }, { key: 'status', label: 'Status', type: 'status' }],
   },
@@ -192,33 +195,45 @@ export const adminResources: Record<string, AdminResource> = {
       { key: 'state', label: 'State', required: true },
       { key: 'zip', label: 'PIN code' },
       { key: 'country', label: 'Country', required: true },
+      { key: 'username', label: 'Portal username', help: 'Use letters, numbers, hyphens or underscores.' },
+      { key: 'password', label: 'Portal password', type: 'password', help: 'Set a password to enable portal login. Leave blank when keeping the current password.' },
       { key: 'isDefault', label: 'Default warehouse', type: 'boolean' },
       { key: 'status', label: 'Status', type: 'select', options: [{ label: 'Active', value: 'active' }, { label: 'Inactive', value: 'inactive' }] },
     ],
-    columns: [{ key: 'name', label: 'Warehouse' }, { key: 'code', label: 'Code' }, { key: 'type', label: 'Type' }, { key: 'state', label: 'State' }, { key: 'status', label: 'Status', type: 'status' }],
+    columns: [{ key: 'name', label: 'Warehouse' }, { key: 'code', label: 'Code' }, { key: 'type', label: 'Type' }, { key: 'state', label: 'State' }, { key: 'username', label: 'Portal username' }, { key: 'status', label: 'Status', type: 'status' }],
   },
   admins: {
-    key: 'admins', title: 'Administrators', description: 'Manage admin access and role assignments.',
-    endpoint: '/admin/admins', singular: 'administrator', icon: 'Users',
+    key: 'admins', title: 'Employees', description: 'Manage employee logins, assign AdminRole permissions, and control account access.',
+    endpoint: '/admin/admins', singular: 'employee', icon: 'Users', paginated: true, searchable: true, zoneFilter: true,
     statusEndpoint: '/admin/admins/:id/status', statusValues: activeStatus,
     fields: [
       { key: 'fName', label: 'First name', required: true },
       { key: 'lName', label: 'Last name' },
-      { key: 'email', label: 'Email', type: 'email', required: true, createOnly: true },
-      { key: 'phone', label: 'Phone' },
-      { key: 'password', label: 'Temporary password', type: 'password', required: true, createOnly: true },
-      { key: 'roleId', label: 'Role', type: 'select', required: true, optionsPath: '/admin/roles', optionLabel: 'name' },
-      { key: 'zoneId', label: 'Zone ID' },
-      { key: 'status', label: 'Active', type: 'boolean' },
+      { key: 'email', label: 'Email', type: 'email', required: true },
+      { key: 'phone', label: 'Phone', required: true },
+      { key: 'password', label: 'Temporary password', type: 'password', required: true, createOnly: true, help: 'Share it with the employee securely. No invitation email is sent.' },
+      { key: 'password', label: 'New password', type: 'password', editOnly: true, help: 'Optional. Leave blank to keep the current password; new passwords must include upper and lower case, a number and a symbol.' },
+      { key: 'image', label: 'Profile image URL', placeholder: 'https://…', help: 'Use the employee image URL managed by your asset service.' },
+      { key: 'roleId', label: 'Role', type: 'select', required: true, optionsPath: '/admin/employee-roles', optionLabel: 'name', help: 'Create and activate a role in Admin roles before assigning it.' },
+      { key: 'zoneId', label: 'Zone', type: 'select', nullable: true, optionsPath: '/admin/zones', optionLabel: 'name', help: 'Optional: limit this employee to a zone where supported.' },
     ],
-    columns: [{ key: 'fName', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'roleId', label: 'Role' }, { key: 'status', label: 'Status', type: 'status' }],
+    columns: [{ key: 'fName', label: 'Name' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' }, { key: 'roleId', label: 'Role' }, { key: 'status', label: 'Status', type: 'status' }],
   },
   roles: {
-    key: 'roles', title: 'Admin roles', description: 'Define administrator roles and module access.',
+    key: 'roles', title: 'Admin roles', description: 'Create reusable roles by choosing the admin modules employees may access.',
     endpoint: '/admin/roles', singular: 'role', icon: 'Shield',
     fields: [
       { key: 'name', label: 'Role name', required: true },
-      { key: 'modules', label: 'Module permissions (JSON)', type: 'json', placeholder: '[]', help: 'Enter permissions as valid JSON.' },
+      {
+        key: 'modules',
+        label: 'Module permissions',
+        type: 'multi-select',
+        optionsPath: '/admin/roles/permissions',
+        optionLabel: 'label',
+        optionValue: 'key',
+        required: true,
+        help: 'The selected modules control sidebar visibility and API access. Employees and Custom Roles are separate permissions.',
+      },
       { key: 'status', label: 'Active', type: 'boolean' },
     ],
     columns: [{ key: 'name', label: 'Role' }, { key: 'status', label: 'Status', type: 'status' }],
@@ -310,7 +325,6 @@ export const adminResources: Record<string, AdminResource> = {
     icon: 'Users',
     paginated: true,
     searchable: true,
-    readOnly: true,
     statusEndpoint: '/admin/customers/:id/status',
     statusValues: activeStatus,
     fields: [],
@@ -332,7 +346,6 @@ export const adminResources: Record<string, AdminResource> = {
     icon: 'Store',
     paginated: true,
     searchable: true,
-    readOnly: true,
     statusEndpoint: '/admin/vendors/:id/status',
     statusValues: activeStatus,
     fields: [],
@@ -378,8 +391,9 @@ export const adminResources: Record<string, AdminResource> = {
     endpoint: '/admin/cashback',
     singular: 'cashback rule',
     icon: 'Ticket',
-    statusEndpoint: '/admin/cashback/:id/status',
+    statusEndpoint: '/admin/cashback/:id/toggle',
     statusValues: activeStatus,
+    toggleOnly: true,
     fields: [
       { key: 'title', label: 'Title', required: true },
       { key: 'cashbackType', label: 'Type', type: 'select', required: true, options: [{ label: 'Percent', value: 'percent' }, { label: 'Fixed', value: 'fixed' }] },
@@ -404,8 +418,9 @@ export const adminResources: Record<string, AdminResource> = {
     endpoint: '/admin/wallet-bonus',
     singular: 'wallet bonus',
     icon: 'Ticket',
-    statusEndpoint: '/admin/wallet-bonus/:id/status',
+    statusEndpoint: '/admin/wallet-bonus/:id/toggle',
     statusValues: activeStatus,
+    toggleOnly: true,
     fields: [
       { key: 'minimumAddAmount', label: 'Minimum add amount', type: 'number', required: true },
       { key: 'bonusAmount', label: 'Bonus amount', type: 'number', required: true },
@@ -415,6 +430,30 @@ export const adminResources: Record<string, AdminResource> = {
       { key: 'minimumAddAmount', label: 'Min amount', type: 'number' },
       { key: 'bonusAmount', label: 'Bonus', type: 'number' },
       { key: 'status', label: 'Status', type: 'status' },
+    ],
+  },
+  membership: {
+    key: 'membership',
+    title: 'Membership Plans',
+    description: 'Create and manage customer membership/subscription plans.',
+    endpoint: '/admin/membership/plans',
+    singular: 'plan',
+    icon: 'Star',
+    statusEndpoint: '/admin/membership/plans/:id/toggle',
+    statusValues: activeStatus,
+    toggleOnly: true,
+    fields: [
+      { key: 'name', label: 'Plan name', required: true },
+      { key: 'price', label: 'Price', type: 'number', required: true },
+      { key: 'duration', label: 'Duration (days)', type: 'number', required: true },
+      { key: 'description', label: 'Description', type: 'textarea' },
+      { key: 'isActive', label: 'Active', type: 'boolean' },
+    ],
+    columns: [
+      { key: 'name', label: 'Plan' },
+      { key: 'price', label: 'Price', type: 'number' },
+      { key: 'duration', label: 'Days', type: 'number' },
+      { key: 'isActive', label: 'Status', type: 'status' },
     ],
   },
   'batch-write-offs': {
@@ -435,6 +474,84 @@ export const adminResources: Record<string, AdminResource> = {
     endpoint: '/admin/stock-movements', singular: 'movement', icon: 'ArrowLeftRight', paginated: true, readOnly: true,
     fields: [],
     columns: [{ key: 'movedAt', label: 'Date', type: 'date' }, { key: 'itemId', label: 'Product' }, { key: 'warehouseId', label: 'Warehouse' }, { key: 'type', label: 'Movement' }, { key: 'qtyChange', label: 'Change', type: 'number' }, { key: 'balanceAfter', label: 'Balance', type: 'number' }, { key: 'note', label: 'Note' }],
+  },
+  'brand-sales': {
+    key: 'brand-sales', title: 'Brand Sales', description: 'Create time-limited brand-wide discount sales.',
+    endpoint: '/admin/brand-sales', singular: 'brand sale', icon: 'Zap', paginated: true,
+    statusEndpoint: '/admin/brand-sales/:id/toggle', statusValues: { active: true, inactive: false }, toggleOnly: true,
+    fields: [
+      { key: 'title', label: 'Title', required: true },
+      { key: 'brands', label: 'Brand IDs (JSON array)', type: 'json', required: true, placeholder: '["brandId1","brandId2"]' },
+      { key: 'discountType', label: 'Discount type', type: 'select', required: true, options: [{ label: 'Percent', value: 'percent' }, { label: 'Fixed', value: 'fixed' }] },
+      { key: 'discount', label: 'Discount value', type: 'number', required: true },
+      { key: 'applyOn', label: 'Apply on', type: 'select', options: [{ label: 'Selling price', value: 'selling' }, { label: 'MRP', value: 'mrp' }] },
+      { key: 'startAt', label: 'Start date', type: 'date', required: true },
+      { key: 'endAt', label: 'End date', type: 'date', required: true },
+      { key: 'isActive', label: 'Active', type: 'boolean' },
+    ],
+    columns: [{ key: 'title', label: 'Title' }, { key: 'discountType', label: 'Type' }, { key: 'discount', label: 'Discount', type: 'number' }, { key: 'startAt', label: 'Start', type: 'date' }, { key: 'endAt', label: 'End', type: 'date' }, { key: 'isActive', label: 'Status', type: 'status' }],
+  },
+  'cancel-reasons': {
+    key: 'cancel-reasons', title: 'Cancel Reasons', description: 'Manage order cancellation reasons shown to customers and vendors.',
+    endpoint: '/admin/cancel-reasons', singular: 'cancel reason', icon: 'ClipboardMinus',
+    statusEndpoint: '/admin/cancel-reasons/:id/toggle', statusValues: { active: true, inactive: false }, toggleOnly: true,
+    fields: [
+      { key: 'reason', label: 'Reason text', required: true },
+      { key: 'userType', label: 'User type', type: 'select', required: true, options: [{ label: 'Customer', value: 'customer' }, { label: 'Vendor', value: 'vendor' }, { label: 'Admin', value: 'admin' }] },
+      { key: 'status', label: 'Active', type: 'boolean' },
+    ],
+    columns: [{ key: 'reason', label: 'Reason' }, { key: 'userType', label: 'User type' }, { key: 'status', label: 'Status', type: 'status' }],
+  },
+  'parcel-categories': {
+    key: 'parcel-categories', title: 'Parcel Categories', description: 'Manage parcel delivery categories.',
+    endpoint: '/admin/parcel-categories', singular: 'parcel category', icon: 'Package',
+    fields: [
+      { key: 'name', label: 'Category name', required: true },
+      { key: 'image', label: 'Image URL' },
+      { key: 'description', label: 'Description', type: 'textarea' },
+      { key: 'sortOrder', label: 'Sort order', type: 'number' },
+      { key: 'isActive', label: 'Active', type: 'boolean' },
+    ],
+    columns: [{ key: 'name', label: 'Name' }, { key: 'sortOrder', label: 'Order', type: 'number' }, { key: 'isActive', label: 'Status', type: 'status' }],
+  },
+  vehicles: {
+    key: 'vehicles', title: 'Vehicles', description: 'Manage delivery vehicle types.',
+    endpoint: '/admin/vehicles', singular: 'vehicle', icon: 'Truck',
+    fields: [
+      { key: 'type', label: 'Vehicle type', required: true, placeholder: 'e.g. Bike, Van, Truck' },
+      { key: 'image', label: 'Image URL' },
+    ],
+    columns: [{ key: 'type', label: 'Type' }],
+  },
+};
+
+export const masterAdminResources: Record<string, AdminResource> = {
+  'master-employees': {
+    ...adminResources.admins,
+    key: 'master-employees',
+    endpoint: '/admin/master/employees',
+    statusEndpoint: '/admin/master/employees/:id/status',
+    description: 'Create staff accounts, assign a role, and enable or disable sign-in.',
+    fields: [
+      ...adminResources.admins.fields.map((field) => field.key === 'roleId'
+        ? { ...field, optionsPath: '/admin/master/employee-roles', help: 'Choose an active role from Role permissions.' }
+        : field),
+      { key: 'status', label: 'Enable sign-in', type: 'boolean', createOnly: true },
+    ],
+  },
+  'master-roles': {
+    ...adminResources.roles,
+    key: 'master-roles',
+    title: 'Role permissions',
+    endpoint: '/admin/master/roles',
+    description: 'Choose which modules each staff role can open and use.',
+    fields: adminResources.roles.fields.map((field) => field.key === 'modules'
+      ? { ...field, optionsPath: '/admin/master/roles/permissions' }
+      : field),
+    columns: [
+      ...adminResources.roles.columns,
+      { key: 'modules', label: 'Assigned modules' },
+    ],
   },
 };
 

@@ -37,6 +37,12 @@ test('cart exposes the guest-compatible Laravel cart endpoints', () => {
     ['GET', '/order/details'],
     ['POST', '/order/place'],
     ['PUT', '/order/cancel'],
+    ['POST', '/order/:id/refund-request'],
+    ['POST', '/order/place-parcel'],
+    ['POST', '/dm-review'],
+    ['GET', '/parcel-categories'],
+    ['GET', '/cancel-reasons'],
+    ['POST', '/item-review'],
   ]);
 });
 
@@ -48,7 +54,7 @@ test('checkout rejects unsupported types and payment methods before service call
   );
   await assert.rejects(
     orderService.placeOrder(actor, '3', { order_type: 'delivery', payment_method: 'digital', store_id: 'store' }),
-    /Only cash_on_delivery is enabled/,
+    /payment_method must be cash_on_delivery, digital_payment, or wallet/,
   );
   await assert.rejects(
     orderService.placeOrder(actor, '3', {

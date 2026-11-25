@@ -8,6 +8,7 @@ module.exports = (serviceName, audience) => (req, res, next) => {
     if (claims.sub !== serviceName || claims.role !== 'service') {
       return res.status(403).json({ success: false, message: 'Service access denied' });
     }
+    req.serviceClaims = claims;
     return next();
   } catch {
     return res.status(401).json({ success: false, message: 'Invalid or expired service token' });

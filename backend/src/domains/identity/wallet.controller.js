@@ -1,13 +1,9 @@
-const mongoose = require('mongoose');
 const User = require('../../models/auth/User');
 const WalletTransaction = require('../../models/auth/WalletTransaction');
 const { success, error, paginated } = require('../../utils/response');
 const { paginate } = require('../../utils/pagination');
 
-// Wallet bonus model (lazy require to avoid circular)
-const getWalletBonus = () => {
-  try { return require('../../models/store/WalletBonus'); } catch { return null; }
-};
+const WalletBonus = require('../../models/store/WalletBonus');
 
 // GET /customer/wallet/transactions
 exports.transactions = async (req, res, next) => {
@@ -33,8 +29,6 @@ exports.balance = async (req, res, next) => {
 // GET /customer/wallet/bonuses
 exports.bonuses = async (req, res, next) => {
   try {
-    const WalletBonus = getWalletBonus();
-    if (!WalletBonus) return success(res, []);
     const now = new Date();
     const bonuses = await WalletBonus.find({
       status: true,
@@ -47,49 +41,14 @@ exports.bonuses = async (req, res, next) => {
   } catch (err) { next(err); }
 };
 
-// POST /customer/wallet/add-fund  body: { amount, payment_method }
-// For now: direct credit (payment gateway integration in Phase 6)
+// POST /customer/wallet/add-fund
+// Wallet funds must only be credited after a payment provider confirms payment.
 exports.addFund = async (req, res, next) => {
   try {
-    const { amount } = req.body;
-    if (!amount || amount <= 0) return error(res, 'amount must be positive', 400);
-    if (amount > 100000) return error(res, 'Maximum add fund amount is ₹1,00,000', 400);
-
-    const user = await User.findById(req.user.id);
-    if (!user) return error(res, 'User not found', 404);
-
-    // Check for applicable wallet bonus
-    let bonusAmount = 0;
-    const WalletBonus = getWalletBonus();
-    if (WalletBonus) {
-      const now = new Date();
-      const bonus = await WalletBonus.findOne({
-        status: true,
-        bonusType: 'percentage',
-        minimumAddAmount: { $lte: amount },
-        $and: [
-          { $or: [{ startDate: null }, { startDate: { $lte: now } }] },
-          { $or: [{ endDate: null }, { endDate: { $gte: now } }] },
-        ],
-      }).sort({ bonusAmount: -1 });
-      if (bonus) {
-        bonusAmount = Number(((amount * bonus.bonusAmount) / 100).toFixed(2));
-        if (bonus.maximumBonusAmount > 0) bonusAmount = Math.min(bonusAmount, bonus.maximumBonusAmount);
-      }
-    }
-
-    const totalCredit = Number((amount + bonusAmount).toFixed(2));
-    user.walletBalance = Number((user.walletBalance + totalCredit).toFixed(2));
-    await user.save();
-
-    await WalletTransaction.create({
-      userId: user._id, type: 'credit', amount: totalCredit,
-      balance: user.walletBalance, referenceType: 'bonus',
-      note: bonusAmount > 0 ? `Added ₹${amount} + ₹${bonusAmount} bonus` : `Added ₹${amount}`,
-    });
-
-    return success(res, { balance: user.walletBalance, added: amount, bonus: bonusAmount });
-  } catch (err) { next(err); }
+    return error(res, 'Use Razorpay checkout to add wallet funds', 410);
+  } catch (err) {
+    next(err);
+  }
 };
 
 // Admin: POST /admin/customers/:id/wallet/add-fund

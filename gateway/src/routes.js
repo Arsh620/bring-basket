@@ -5,7 +5,9 @@ module.exports = {
     target: process.env.IDENTITY_SERVICE_URL || 'http://localhost:5001',
     pathPrefix: [
       '/api/v1/admin/auth',
+      '/api/v1/admin/master',
       '/api/v1/admin/admins',
+      '/api/v1/admin/employee-roles',
       '/api/v1/admin/roles',
       '/api/v1/customer/auth',
       '/api/v1/customer/addresses',
@@ -13,10 +15,12 @@ module.exports = {
       '/api/v1/supplier/auth',
       '/api/v1/warehouse/auth',
       '/api/v1/deliveryman/auth',
+      '/api/v1/vendor/roles',
+      '/api/v1/vendor/employees',
     ],
   },
 
-  // Catalog service (5002) — items, categories, brands, units
+  // Catalog service (5002) — items, categories, brands, units, reviews
   catalog: {
     target: process.env.CATALOG_SERVICE_URL || 'http://localhost:5002',
     pathPrefix: [
@@ -26,8 +30,11 @@ module.exports = {
       '/api/v1/admin/unit-groups',
       '/api/v1/admin/items',
       '/api/v1/admin/item-batches',
+      '/api/v1/admin/reviews',
+      '/api/v1/admin/item-review',
       '/api/v1/customer/items',
       '/api/v1/customer/categories',
+      '/api/v1/item-review',
     ],
   },
 
@@ -42,6 +49,7 @@ module.exports = {
       '/api/v1/admin/coupons',
       '/api/v1/admin/flash-sales',
       '/api/v1/admin/campaigns',
+      '/api/v1/admin/brand-sales',
       '/api/v1/admin/advertisements',
       '/api/v1/customer/stores',
       '/api/v1/customer/zones',
@@ -49,6 +57,14 @@ module.exports = {
       '/api/v1/customer/flash-sales',
       '/api/v1/customer/campaigns',
       '/api/v1/customer/advertisements',
+      '/api/v1/zones',
+      '/api/v1/config',
+      '/api/v1/terms-and-conditions',
+      '/api/v1/about-us',
+      '/api/v1/privacy-policy',
+      '/api/v1/refund-policy',
+      '/api/v1/shipping-policy',
+      '/api/v1/cancellation',
     ],
   },
 
@@ -64,24 +80,35 @@ module.exports = {
     ],
   },
 
-  // Procurement service (5005) — purchase orders, bills, payments, returns
+  // Procurement service (5005) — purchase orders, bills, payments, returns, supplier
   procurement: {
     target: process.env.PROCUREMENT_SERVICE_URL || 'http://localhost:5005',
     pathPrefix: [
       '/api/v1/admin/purchases',
+      '/api/v1/supplier',
     ],
   },
 
-  // Order service (5006) — cart, orders
+  // Order service (5006) — cart, orders, parcel, cancel reasons
   order: {
     target: process.env.ORDER_SERVICE_URL || 'http://localhost:5006',
     pathPrefix: [
       '/api/v1/customer/cart',
       '/api/v1/customer/order',
-      '/api/v1/customer/orders',
-      '/api/v1/customer/coupons',
+      '/api/v1/cart',
+      '/api/v1/order',
+      '/api/v1/parcel-categories',
+      '/api/v1/cancel-reasons',
+      '/api/v1/dm-review',
       '/api/v1/admin/orders',
+      '/api/v1/admin/parcel-categories',
+      '/api/v1/admin/cancel-reasons',
     ],
+  },
+
+  customerWishlist: {
+    target: process.env.BACKEND_URL || 'http://localhost:5000',
+    pathPrefix: ['/api/v1/customer/wish-list'],
   },
 
   // Accounting service (5007) — wallet, loyalty, cashback, wallet-bonus, customer mgmt
@@ -94,15 +121,20 @@ module.exports = {
       '/api/v1/admin/cashback',
       '/api/v1/admin/wallet-bonus',
       '/api/v1/admin/customers',
+      '/api/v1/admin/dashboard/customer-stats',
     ],
   },
 
-  // Notification service (5008) — in-app notifications
+  // Notification service (5008) — in-app notifications, push templates, chat
   notification: {
     target: process.env.NOTIFICATION_SERVICE_URL || 'http://localhost:5008',
     pathPrefix: [
       '/api/v1/admin/notifications',
+      '/api/v1/admin/automated-messages',
+      '/api/v1/admin/conversations',
       '/api/v1/customer/notifications',
+      '/api/v1/customer/conversations',
+      '/api/v1/vendor/conversations',
       '/api/v1/deliveryman/notifications',
     ],
   },
@@ -115,19 +147,13 @@ module.exports = {
     ],
   },
 
-  // Settings service — still on backend monolith (5000), extract later
-  settings: {
-    target: process.env.SETTINGS_SERVICE_URL || 'http://localhost:5000',
+  // POS + Accounting/GST — backend monolith (5000) until extracted
+  pos: {
+    target: process.env.BACKEND_URL || 'http://localhost:5000',
     pathPrefix: [
-      '/api/v1/admin/settings',
-      '/api/v1/config',
-      '/api/v1/terms-and-conditions',
-      '/api/v1/about-us',
-      '/api/v1/privacy-policy',
-      '/api/v1/refund-policy',
-      '/api/v1/shipping-policy',
-      '/api/v1/cancellation',
-      '/api/v1/zones',
+      '/api/v1/admin/pos',
+      '/api/v1/vendor/pos',
+      '/api/v1/admin/account',
     ],
   },
 
@@ -139,12 +165,11 @@ module.exports = {
     ],
   },
 
-  // Admin management — backend monolith (5000)
-  adminMgmt: {
+  // Warehouse portal — backend monolith (5000)
+  warehouse: {
     target: process.env.BACKEND_URL || 'http://localhost:5000',
     pathPrefix: [
-      '/api/v1/admin/vendors',
-      '/api/v1/admin/delivery-men',
+      '/api/v1/warehouse',
     ],
   },
 
@@ -153,6 +178,26 @@ module.exports = {
     target: process.env.BACKEND_URL || 'http://localhost:5000',
     pathPrefix: [
       '/api/v1/deliveryman',
+    ],
+  },
+
+  // Admin management (vendors, DMs, reports, settings, disbursements) — monolith
+  adminMgmt: {
+    target: process.env.BACKEND_URL || 'http://localhost:5000',
+    pathPrefix: [
+      '/api/v1/admin/vendors',
+      '/api/v1/admin/delivery-men',
+      '/api/v1/admin/vehicles',
+      '/api/v1/admin/dashboard/order-stats',
+      '/api/v1/admin/settings',
+      '/api/v1/admin/membership',
+      '/api/v1/admin/loyalty',
+      '/api/v1/admin/wallet',
+      '/api/v1/admin/withdrawal-methods',
+      '/api/v1/admin/store-disbursements',
+      '/api/v1/admin/withdraw-requests',
+      '/api/v1/admin/activity-logs',
+      '/api/v1/admin/reports',
     ],
   },
 };

@@ -3,22 +3,37 @@ const assert = require('node:assert/strict');
 const Order = require('../src/domains/orders/order.model');
 const orderService = require('../src/domains/orders/order.service');
 const adminRoutes = require('../src/routes/v1/orders/admin');
-const { adminAuth } = require('../src/middleware/auth');
 
 const routeEntries = (router) => router.stack
   .filter((layer) => layer.route)
   .map(({ route }) => [Object.keys(route.methods)[0].toUpperCase(), route.path, route.stack[0].handle]);
 
-test('admin order list and details require an admin token', () => {
-  assert.deepEqual(routeEntries(adminRoutes), [
-    ['GET', '/orders', adminAuth],
-    ['GET', '/orders/:id', adminAuth],
+test('admin order, dispatch and refund routes require authentication', async () => {
+  const entries = routeEntries(adminRoutes);
+  assert.deepEqual(entries.map(([method, path]) => [method, path]), [
+    ['GET', '/orders'],
+    ['GET', '/orders/refunds'],
+    ['GET', '/orders/:id'],
+    ['GET', '/orders/:id/deliverymen'],
+    ['PATCH', '/orders/:id/assign-dm'],
+    ['PATCH', '/orders/:id/status'],
+    ['PATCH', '/orders/:id/refund'],
   ]);
+  for (const [, , authorize] of entries) {
+    let status;
+    const res = {
+      status(code) { status = code; return this; },
+      json(body) { return body; },
+    };
+    const body = await authorize({ headers: {} }, res, () => assert.fail('Unauthenticated request was accepted'));
+    assert.equal(status, 401);
+    assert.equal(body.success, false);
+  }
 });
 
 test('admin order filters are validated and search is literal', async () => {
   await assert.rejects(
-    orderService.listAdminOrders({ status: 'accepted' }),
+    orderService.listAdminOrders({ status: 'unknown' }),
     /Unsupported order status filter/,
   );
   await assert.rejects(

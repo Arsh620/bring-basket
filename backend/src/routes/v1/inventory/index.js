@@ -6,11 +6,11 @@ const stockTransfers = require('../../../domains/inventory/stock-transfers.contr
 const storeStockRequests = require('../../../domains/inventory/store-stock-requests.controller');
 const batchWriteOffs = require('../../../domains/inventory/batch-write-offs.controller');
 const orderStockReservations = require('../../../domains/inventory/order-stock-reservations.controller');
-const { adminAuth } = require('../../../middleware/auth');
+const { adminAuth, checkAdminModule } = require('../../../middleware/auth');
 const { checkRole } = require('../../../middleware/roleCheck');
 const orderServiceAuth = require('../../../middleware/service-auth')('order-service', 'inventory-service');
 
-const adminOnly = [adminAuth, checkRole('admin')];
+const adminOnly = [adminAuth, checkRole('admin'), checkAdminModule('warehouse')];
 
 // Warehouses
 router.get('/warehouses', adminOnly, warehouses.getAll);

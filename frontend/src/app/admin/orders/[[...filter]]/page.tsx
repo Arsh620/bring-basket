@@ -2,11 +2,12 @@
 
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { ArrowLeft, ArrowRight, ClipboardList, Search } from 'lucide-react';
 
 import { AdminLayout } from '@/components/admin/layout/AdminLayout';
+import { OrderDispatchActions } from '@/components/admin/OrderDispatchActions';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -23,8 +24,11 @@ import api from '@/lib/api/client';
 
 const statuses = [
   ['all', 'All orders'],
+  ['dispatch', 'Dispatch'],
+  ['unassigned', 'Unassigned'],
   ['stock_pending', 'Stock pending'],
   ['pending', 'Pending'],
+  ['accepted', 'Accepted'],
   ['confirmed', 'Confirmed'],
   ['processing', 'Processing'],
   ['handover', 'Handover'],
@@ -54,6 +58,7 @@ interface AdminOrder {
   orderStatus: OrderStatus;
   paymentMethod: string;
   paymentStatus: string;
+  deliverymanId?: string | null;
   orderAmount: number;
   items: OrderLine[];
   deliveryAddress?: {
@@ -85,28 +90,27 @@ const currency = (amount: number) => new Intl.NumberFormat('en-IN', {
   maximumFractionDigits: 2,
 }).format(Number(amount) || 0);
 
-function OrdersContent() {
+function OrdersRouteContent() {
   const params = useParams();
   const routeFilter = params.filter;
   const requestedStatus = Array.isArray(routeFilter) ? routeFilter[0] : routeFilter;
   const status = statuses.some(([value]) => value === requestedStatus)
     ? requestedStatus as OrderStatus
     : 'all';
+  return <OrdersContent key={status} status={status} />;
+}
+
+function OrdersContent({ status }: { status: OrderStatus }) {
   const [page, setPage] = useState(1);
   const [searchInput, setSearchInput] = useState('');
   const [search, setSearch] = useState('');
   const [selectedOrderId, setSelectedOrderId] = useState('');
 
-  useEffect(() => {
-    setPage(1);
-    setSelectedOrderId('');
-  }, [status]);
-
   const ordersQuery = useQuery({
     queryKey: ['admin-orders', status, page, search],
     queryFn: async () => {
       const response = await api.get<ApiEnvelope<OrderList>>('/admin/orders', {
-        params: { status, page, limit: 20, ...(search ? { search } : {}) },
+        params: { ...(status === 'dispatch' || status === 'unassigned' ? { queue: status } : { status }), page, limit: 20, ...(search ? { search } : {}) },
       });
       return response.data.data;
     },
@@ -302,6 +306,7 @@ function OrdersContent() {
                       <p className="mt-2 text-sm text-gray-600">{detailQuery.data.orderNote}</p>
                     </div>
                   )}
+                  <OrderDispatchActions key={detailQuery.data._id} order={detailQuery.data} />
                   <p className="border-t border-gray-100 pt-3 text-right text-base font-bold text-[#0b2346]">
                     Total {currency(detailQuery.data.orderAmount)}
                   </p>
@@ -318,7 +323,7 @@ function OrdersContent() {
 export default function AdminOrdersPage() {
   return (
     <AdminLayout>
-      <OrdersContent />
+      <OrdersRouteContent />
     </AdminLayout>
   );
 }

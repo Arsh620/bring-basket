@@ -29,13 +29,7 @@ const getAll = async ({ storeId, motherWarehouseId, status, page, limit: lim }) 
     StoreStockRequest.countDocuments(filter),
   ]);
 
-  return {
-    requests,
-    total,
-    page: pg,
-    limit,
-    pages: Math.ceil(total / limit),
-  };
+  return { requests, total, page: pg, limit, pages: Math.ceil(total / limit) };
 };
 
 const getById = async (id) => {
@@ -227,6 +221,67 @@ const rejectRequest = async (id, rejectReason) => {
   return request;
 };
 
+// ── Vendor-scoped helpers ─────────────────────────────────────────────────────
+
+const getAllForVendor = async (storeIds, query = {}) => {
+  if (!storeIds?.length) throw new AppError('No store access', 403);
+  const filter = { storeId: { $in: storeIds } };
+  if (query.status) filter.status = query.status;
+
+  const { skip, page: pg, limit } = paginate(query);
+  const [requests, total] = await Promise.all([
+    StoreStockRequest.find(filter)
+      .populate('storeId', 'name')
+      .populate('motherWarehouseId', 'name code')
+      .populate('items.itemId', 'name sku barcode')
+      .sort({ createdAt: -1 })
+      .skip(skip)
+      .limit(limit),
+    StoreStockRequest.countDocuments(filter),
+  ]);
+  return { requests, total, page: pg, limit, pages: Math.ceil(total / limit) };
+};
+
+const getByIdForVendor = async (id, storeIds) => {
+  if (!isValidId(id)) throw new AppError('Invalid request ID', 400);
+  if (!storeIds?.length) throw new AppError('No store access', 403);
+  const request = await StoreStockRequest.findOne({ _id: id, storeId: { $in: storeIds } })
+    .populate('storeId', 'name')
+    .populate('motherWarehouseId', 'name code')
+    .populate('items.itemId', 'name sku barcode');
+  if (!request) throw new AppError('Not found', 404);
+  return request;
+};
+
+const createRequestForVendor = async (storeIds, body) => {
+  if (!storeIds?.length) throw new AppError('No store access', 403);
+  const { storeId, motherWarehouseId, items, notes } = body;
+  if (!storeId || !isValidId(storeId)) throw new AppError('Valid storeId is required', 400);
+  if (!storeIds.map(String).includes(String(storeId))) throw new AppError('Store access denied', 403);
+  return createRequest({ storeId, motherWarehouseId, items, notes, source: 'vendor' });
+};
+
+const receiveRequestForVendor = async (id, storeIds, items, grnNumber) => {
+  if (!storeIds?.length) throw new AppError('No store access', 403);
+  if (!isValidId(id)) throw new AppError('Invalid request ID', 400);
+  const request = await StoreStockRequest.findOne({ _id: id, storeId: { $in: storeIds } });
+  if (!request) throw new AppError('Not found', 404);
+  return receiveRequest(id, items, grnNumber);
+};
+
+const cancelRequestForVendor = async (id, storeIds) => {
+  if (!storeIds?.length) throw new AppError('No store access', 403);
+  if (!isValidId(id)) throw new AppError('Invalid request ID', 400);
+  const request = await StoreStockRequest.findOne({ _id: id, storeId: { $in: storeIds } });
+  if (!request) throw new AppError('Not found', 404);
+  if (!['requested', 'approved'].includes(request.status)) {
+    throw new AppError(`Cannot cancel — status is ${request.status}`, 400);
+  }
+  request.status = 'cancelled';
+  await request.save();
+  return request;
+};
+
 module.exports = {
   getAll,
   getById,
@@ -235,4 +290,9 @@ module.exports = {
   dispatchRequest,
   receiveRequest,
   rejectRequest,
+  getAllForVendor,
+  getByIdForVendor,
+  createRequestForVendor,
+  receiveRequestForVendor,
+  cancelRequestForVendor,
 };

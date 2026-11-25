@@ -6,25 +6,24 @@ const { success, error } = require('../../utils/response');
 exports.login = async (req, res, next) => {
   try {
     const { username, password } = req.body;
-    if (!username || !password) return error(res, 'Username and password required', 400);
+    if (typeof username !== 'string' || typeof password !== 'string' || !username.trim() || !password) {
+      return error(res, 'Username and password required', 400);
+    }
 
-    const warehouse = await Warehouse.findOne({ username, status: 'active' }).select('+passwordHash');
-    if (!warehouse) return error(res, 'Invalid credentials', 401);
+    const warehouse = await Warehouse.findOne({ username: username.trim(), status: 'active' }).select('+passwordHash');
+    if (!warehouse?.passwordHash) return error(res, 'Invalid credentials', 401);
 
     const isMatch = await bcrypt.compare(password, warehouse.passwordHash);
     if (!isMatch) return error(res, 'Invalid credentials', 401);
 
     const token = generateToken(warehouse._id, 'warehouse');
-    const data = warehouse.toObject();
-    delete data.passwordHash;
-
-    return success(res, { token, warehouse: data }, 'Login successful');
+    return success(res, { token, warehouse }, 'Login successful');
   } catch (err) { next(err); }
 };
 
 exports.me = async (req, res, next) => {
   try {
-    const warehouse = await Warehouse.findById(req.user.id);
+    const warehouse = req.warehouse;
     if (!warehouse) return error(res, 'Not found', 404);
     return success(res, warehouse);
   } catch (err) { next(err); }
